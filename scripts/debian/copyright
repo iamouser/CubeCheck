@@ -1,0 +1,11 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: CubeCheck
+Source: https://github.com/
+
+Files: *
+Copyright: 2026 AuraStudio, AnProject
+License: MIT
+ See /usr/share/doc/cubecheck/LICENSE.md
+ .
+ CubeCheck source is MIT. Third-party Windows utilities are not shipped
+ in this .deb and keep their own licenses.

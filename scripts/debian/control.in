@@ -1,0 +1,14 @@
+Package: cubecheck
+Version: @VERSION@
+Section: utils
+Priority: optional
+Architecture: @ARCH@
+Maintainer: AuraStudio, AnProject
+Depends: libc6
+Recommends: plocate | mlocate, gnome-system-monitor | htop
+Suggests: fsearch, catfish, sysdig
+Description: CubeCheck — проверка ПК на читы Minecraft
+ CubeCheck is a desktop checker for Minecraft cheat names.
+ On Linux it launches FSearch/Catfish/plocate, Mission Center or
+ GNOME System Monitor, sysdig, and in-app autostart/recent-file lists.
+ Windows tools (Everything, Sysinternals) are not included.

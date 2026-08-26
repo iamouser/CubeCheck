@@ -1,0 +1,11 @@
+Everything.exe
+Shellbag.exe
+Procmon64.exe
+Autoruns64.exe
+procexp64.exe
+SystemInformer/SystemInformer.exe
+SystemInformer/ksi.dll
+SystemInformer/SystemInformer.sys
+SystemInformer/SystemInformer.sig
+SystemInformer/ksidyn.bin
+SystemInformer/ksidyn.sig

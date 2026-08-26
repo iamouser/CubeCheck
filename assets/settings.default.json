@@ -1,0 +1,20 @@
+{
+  "theme": "black",
+  "zoom": 1.0,
+  "glow": {
+    "enabled": true,
+    "color": [212, 175, 55],
+    "color2": [255, 214, 90],
+    "gradient": false,
+    "gradient_speed": 1.0,
+    "radius": 34.0,
+    "intensity": 1.0,
+    "areas": {
+      "sidebar": true,
+      "about": true,
+      "system": true,
+      "footer": true
+    }
+  },
+  "autosave": "on_change"
+}

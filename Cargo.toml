@@ -1,0 +1,101 @@
+[package]
+name = "cubecheck"
+version = "1.0.0-beta"
+edition = "2021"
+authors = ["AuraStudio", "AnProject"]
+description = "CubeCheck — проверка ПК на читы Minecraft"
+license = "MIT"
+build = "build.rs"
+
+[workspace]
+resolver = "2"
+members = [".", "crates/cubecheck-launcher"]
+
+[features]
+default = ["gui"]
+gui = [
+    "dep:eframe",
+    "dep:egui",
+    "dep:sysinfo",
+    "dep:chrono",
+    "dep:webbrowser",
+    "dep:zip",
+    "dep:ureq",
+    "dep:sha2",
+    "dep:aho-corasick",
+    "dep:serde",
+    "dep:serde_json",
+]
+# universal-local: never download third-party tools (also set by CUBECHECK_OFFLINE / .offline)
+offline = []
+
+[dependencies]
+# x11 is dlopen-based (no Linux sysroot). wayland stays off so Linux cross
+# from Windows does not need libwayland / pkg-config. XWayland covers Wayland sessions.
+eframe = { version = "0.30", default-features = false, features = ["glow", "x11"], optional = true }
+egui = { version = "0.30", optional = true }
+sysinfo = { version = "0.33", optional = true }
+chrono = { version = "0.4", optional = true }
+webbrowser = { version = "1.0", optional = true }
+zip = { version = "2.2", default-features = false, features = ["deflate", "time"], optional = true }
+# rustls (`tls`) — no OpenSSL/native-tls, so Linux can be zig-cross-compiled from Windows.
+ureq = { version = "2.12", default-features = false, features = ["tls"], optional = true }
+sha2 = { version = "0.10", optional = true }
+aho-corasick = { version = "1.1", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Security_WinTrust",
+    "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+winreg = { version = "0.52" }
+
+[build-dependencies]
+winres = "0.1"
+image = { version = "0.25", default-features = false, features = ["ico"] }
+
+[[bin]]
+name = "cubecheck"
+path = "src/main.rs"
+required-features = ["gui"]
+
+[[bin]]
+name = "cubecheck-setup"
+path = "src/bin/setup.rs"
+
+[package.metadata.deb]
+name = "cubecheck"
+maintainer = "AuraStudio, AnProject"
+copyright = "2026 AuraStudio, AnProject"
+license-file = ["LICENSE.md", "0"]
+extended-description = """CubeCheck — проверка ПК на читы Minecraft.
+
+На Linux используются системные программы (FSearch/Catfish/plocate,
+Mission Center, sysdig) и встроенные панели автозагрузки и недавних файлов.
+Windows-утилиты (Everything, Sysinternals) в .deb не входят."""
+depends = "$auto"
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/cubecheck", "usr/bin/", "755"],
+    ["assets/tools.json", "usr/share/cubecheck/assets/", "644"],
+    ["assets/cubecheck.ico", "usr/share/cubecheck/assets/", "644"],
+    ["LICENSE.md", "usr/share/doc/cubecheck/", "644"],
+]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "unwind"
+
+[profile.dev]
+opt-level = 1

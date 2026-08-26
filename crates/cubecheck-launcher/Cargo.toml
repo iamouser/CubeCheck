@@ -1,0 +1,12 @@
+[package]
+name = "cubecheck-launcher"
+version = "1.0.0-beta"
+edition = "2021"
+authors = ["AuraStudio", "AnProject"]
+description = "CubeCheck universal launcher (std only)"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "cubecheck-launcher"
+path = "src/main.rs"

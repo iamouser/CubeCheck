@@ -41,7 +41,7 @@
 
 ## 🌐 Наши социальные сети
 
-* 🎮 **Discord-сервер:** [dsc.gg/aurastudio](https://www.google.com/search?q=https://dsc.gg/aurastudio) | [Присоединиться](https://discord.gg/wDG9B9gZ3E)
+* 🎮 **Discord-сервер:** [dsc.gg/aurastudio](https://dsc.gg/aurastudio) | [Резервная ссылка](https://discord.gg/wDG9B9gZ3E)
 * 📢 **Telegram-канал:** [@AuraStud](https://t.me/AuraStud)
 
 ---

@@ -1,0 +1,219 @@
+<Window x:Class="CubeCheck.Installer.WizardWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="CubeCheck — установка"
+        Width="760" Height="520"
+        MinWidth="720" MinHeight="480"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Background="{DynamicResource CcBg}"
+        Foreground="{DynamicResource CcFg}"
+        FontFamily="Segoe UI, sans-serif"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        Closing="OnWindowClosing"
+        PreviewKeyDown="OnPreviewKeyDown">
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
+
+    <Border Background="#000000" Padding="20,14,20,14">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <StackPanel>
+          <TextBlock Text="CubeCheck" FontSize="22" FontWeight="Bold"/>
+          <TextBlock x:Name="TxtWizardKind" Text="Мастер установки" Foreground="{DynamicResource CcDim}" Margin="0,2,0,0"/>
+        </StackPanel>
+        <StackPanel Grid.Column="1" HorizontalAlignment="Right">
+          <TextBlock Text="1.1 beta" Foreground="{DynamicResource CcGold}"
+                     FontWeight="SemiBold" HorizontalAlignment="Right"/>
+          <TextBlock Text="AuraStudio, AnProject" Foreground="{DynamicResource CcGold}"
+                     FontSize="12" HorizontalAlignment="Right"/>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="1" Margin="18,12,18,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="188"/>
+        <ColumnDefinition Width="*"/>
+      </Grid.ColumnDefinitions>
+      <Border Background="{DynamicResource CcCard}"
+              BorderBrush="{DynamicResource CcBorder}"
+              BorderThickness="1" CornerRadius="8" Padding="12,14" Margin="0,0,12,0">
+        <StackPanel>
+          <TextBlock Text="ШАГИ" FontSize="11" FontWeight="Bold"
+                     Foreground="{DynamicResource CcDim}" Margin="0,0,0,10"/>
+          <Border x:Name="Nav1" CornerRadius="6" Padding="10,8" Margin="0,0,0,6">
+            <TextBlock x:Name="Nav1Text" Text="1. Лицензия"/>
+          </Border>
+          <Border x:Name="Nav2" CornerRadius="6" Padding="10,8" Margin="0,0,0,6">
+            <TextBlock x:Name="Nav2Text" Text="2. Ярлыки"/>
+          </Border>
+          <Border x:Name="Nav3" CornerRadius="6" Padding="10,8" Margin="0,0,0,6">
+            <TextBlock x:Name="Nav3Text" Text="3. Папка"/>
+          </Border>
+          <Border x:Name="Nav4" CornerRadius="6" Padding="10,8" Margin="0,0,0,6">
+            <TextBlock x:Name="Nav4Text" Text="4. Установка"/>
+          </Border>
+          <Border x:Name="Nav5" CornerRadius="6" Padding="10,8">
+            <TextBlock x:Name="Nav5Text" Text="5. Готово"/>
+          </Border>
+        </StackPanel>
+      </Border>
+
+      <Border Grid.Column="1" Background="{DynamicResource CcCard}"
+              BorderBrush="{DynamicResource CcBorder}"
+              BorderThickness="1" CornerRadius="8" Padding="18">
+        <Grid>
+          <Grid x:Name="StepLicense" Visibility="Visible">
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="*"/>
+              <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <TextBlock Text="Лицензия MIT" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8"/>
+            <Border Grid.Row="1" Background="{DynamicResource CcInput}"
+                    BorderBrush="{DynamicResource CcBorder}" BorderThickness="1"
+                    CornerRadius="6" Padding="10">
+              <ScrollViewer>
+                <TextBlock x:Name="LicenseBody" TextWrapping="Wrap"
+                           FontFamily="Consolas" FontSize="12"
+                           Foreground="{DynamicResource CcFg}"/>
+              </ScrollViewer>
+            </Border>
+            <CheckBox x:Name="ChkAccept" Grid.Row="2" Style="{StaticResource CcCheck}"
+                      Content="Я принимаю условия лицензии"
+                      IsChecked="False" Margin="0,12,0,0"
+                      Checked="OnAcceptChanged" Unchecked="OnAcceptChanged"/>
+          </Grid>
+
+          <Grid x:Name="StepShortcuts" Visibility="Collapsed">
+            <StackPanel>
+              <TextBlock Text="Ярлыки" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10"/>
+              <TextBlock Text="Куда создать ярлыки CubeCheck."
+                         Foreground="{DynamicResource CcDim}" TextWrapping="Wrap" Margin="0,0,0,14"/>
+              <CheckBox x:Name="ChkDesktop" Style="{StaticResource CcCheck}"
+                        Content="Ярлык на рабочем столе" IsChecked="True" Margin="0,0,0,10"/>
+              <CheckBox x:Name="ChkMenu" Style="{StaticResource CcCheck}"
+                        Content="Ярлык в меню Пуск" IsChecked="True"/>
+            </StackPanel>
+          </Grid>
+
+          <Grid x:Name="StepDest" Visibility="Collapsed">
+            <StackPanel>
+              <TextBlock Text="Папка установки" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10"/>
+              <TextBlock Text="Выберите каталог. Для Program Files установщик запросит права администратора."
+                         Foreground="{DynamicResource CcDim}" TextWrapping="Wrap" Margin="0,0,0,12"/>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="TxtDest" Height="34" Padding="10,6"
+                         VerticalContentAlignment="Center"
+                         Background="{DynamicResource CcInput}"
+                         Foreground="{DynamicResource CcFg}"
+                         BorderBrush="{DynamicResource CcOutline}"
+                         CaretBrush="{DynamicResource CcFg}"/>
+                <Button Grid.Column="1" Content="Обзор…" Style="{StaticResource GhostButton}"
+                        Margin="8,0,0,0" Click="OnBrowse"/>
+              </Grid>
+              <CheckBox x:Name="ChkLaunch" Style="{StaticResource CcCheck}"
+                        Content="Запустить после установки" IsChecked="True" Margin="0,16,0,0"/>
+            </StackPanel>
+          </Grid>
+
+          <Grid x:Name="StepProgress" Visibility="Collapsed">
+            <StackPanel VerticalAlignment="Center">
+              <TextBlock Text="Установка" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8"/>
+              <TextBlock x:Name="ProgressStatus" Text="Подготовка…"
+                         Foreground="{DynamicResource CcDim}" Margin="0,0,0,12"/>
+              <ProgressBar x:Name="ProgressBar" Height="10" Minimum="0" Maximum="100"
+                           Foreground="{DynamicResource CcAccent}"
+                           Background="{DynamicResource CcTrack}"
+                           BorderThickness="0">
+                <ProgressBar.Template>
+                  <ControlTemplate TargetType="ProgressBar">
+                    <Grid>
+                      <Border Background="{TemplateBinding Background}" CornerRadius="4"/>
+                      <Border x:Name="PART_Track"/>
+                      <Decorator x:Name="PART_Indicator" HorizontalAlignment="Left">
+                        <Border Background="{TemplateBinding Foreground}" CornerRadius="4"/>
+                      </Decorator>
+                    </Grid>
+                  </ControlTemplate>
+                </ProgressBar.Template>
+              </ProgressBar>
+              <Grid Margin="0,8,0,0">
+                <TextBlock x:Name="ProgressFile" Foreground="{DynamicResource CcDim}"
+                           TextWrapping="Wrap" FontSize="12"/>
+                <TextBlock x:Name="ProgressPct" Text="0%" HorizontalAlignment="Right"
+                           Foreground="{DynamicResource CcGold}" FontWeight="SemiBold"/>
+              </Grid>
+              <TextBlock x:Name="ProgressError" Foreground="#E08080" TextWrapping="Wrap"
+                         Margin="0,14,0,0" Visibility="Collapsed"/>
+            </StackPanel>
+          </Grid>
+
+          <Grid x:Name="StepDone" Visibility="Collapsed">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+              <TextBlock Text="Установка завершена" FontSize="22" FontWeight="Bold"
+                         Foreground="{DynamicResource CcGold}" HorizontalAlignment="Center"/>
+              <TextBlock Text="CubeCheck 1.1 beta готов к работе."
+                         Foreground="{DynamicResource CcDim}" HorizontalAlignment="Center" Margin="0,10,0,0"/>
+              <TextBlock Text="AuraStudio, AnProject"
+                         Foreground="{DynamicResource CcGold}" HorizontalAlignment="Center" Margin="0,6,0,0"/>
+            </StackPanel>
+          </Grid>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <Grid Grid.Row="2" Margin="18,14,18,18">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="Auto"/>
+      </Grid.ColumnDefinitions>
+      <Button x:Name="BtnBack" Content="Назад" Style="{StaticResource GhostButton}"
+              Click="OnBack" IsEnabled="False"/>
+      <Button x:Name="BtnCancel" Grid.Column="2" Content="Отмена" Style="{StaticResource GhostButton}"
+              Margin="0,0,8,0" Click="OnCancel"/>
+      <Button x:Name="BtnNext" Grid.Column="3" Content="Далее" Style="{StaticResource AccentButton}"
+              Click="OnNext" IsEnabled="False"/>
+    </Grid>
+
+    <Grid x:Name="ConfirmOverlay" Grid.RowSpan="3" Visibility="Collapsed" Panel.ZIndex="20">
+      <Border Background="#CC000000" MouseLeftButtonDown="OnCancelDim"/>
+      <Border Width="380" Padding="22" Background="{DynamicResource CcCard}"
+              BorderBrush="{DynamicResource CcBorder}" BorderThickness="1" CornerRadius="8"
+              HorizontalAlignment="Center" VerticalAlignment="Center">
+        <StackPanel>
+          <TextBlock Text="Отменить установку?" FontSize="16" FontWeight="SemiBold"
+                     TextWrapping="Wrap"/>
+          <TextBlock Text="Мастер установки будет закрыт."
+                     Foreground="{DynamicResource CcDim}" TextWrapping="Wrap" Margin="0,8,0,18"/>
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Button Grid.Column="1" Content="Нет" Style="{StaticResource GhostButton}"
+                    MinWidth="100" Margin="0,0,8,0" Click="OnCancelNo"/>
+            <Button Grid.Column="2" Content="Да" Style="{StaticResource AccentButton}"
+                    MinWidth="100" Click="OnCancelYes"/>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+  </Grid>
+</Window>

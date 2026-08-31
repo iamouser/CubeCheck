@@ -1,0 +1,73 @@
+[package]
+name = "cubecheck"
+version = "1.1.0-beta"
+edition = "2021"
+authors = ["AuraStudio", "AnProject"]
+description = "CubeCheck — проверка ПК на читы Minecraft"
+license = "MIT"
+build = "build.rs"
+
+[features]
+default = ["gui"]
+gui = [
+    "dep:eframe",
+    "dep:egui",
+    "dep:serde",
+    "dep:serde_json",
+]
+# universal-local: never download third-party tools (also set by CUBECHECK_OFFLINE / .offline)
+offline = []
+setup-embed = ["dep:zip"]
+
+[dependencies]
+libloading = "0.8"
+zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
+# x11 is dlopen-based (no Linux sysroot). wayland stays off so Linux cross
+# from Windows does not need libwayland / pkg-config. XWayland covers Wayland sessions.
+eframe = { version = "0.30", default-features = false, features = ["glow", "x11"], optional = true }
+egui = { version = "0.30", default-features = false, optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[build-dependencies]
+winres = "0.1"
+image = { version = "0.25", default-features = false, features = ["ico"] }
+
+[[bin]]
+name = "cubecheck"
+path = "src/main.rs"
+required-features = ["gui"]
+
+[[bin]]
+name = "cubecheck-setup"
+path = "src/bin/setup.rs"
+required-features = ["setup-embed"]
+
+[package.metadata.deb]
+name = "cubecheck"
+maintainer = "AuraStudio, AnProject"
+copyright = "2026 AuraStudio, AnProject"
+license-file = ["../LICENSE.md", "0"]
+extended-description = """CubeCheck — проверка ПК на читы Minecraft.
+
+На Linux используются системные программы (FSearch/Catfish/plocate,
+Mission Center, sysdig) и встроенные панели автозагрузки и недавних файлов.
+Windows-утилиты (Everything, Sysinternals) в .deb не входят."""
+depends = "$auto"
+section = "utils"
+priority = "optional"
+assets = [
+    ["../target/release/cubecheck", "usr/bin/", "755"],
+    ["../assets/tools.json", "usr/share/cubecheck/assets/", "644"],
+    ["../assets/cubecheck.ico", "usr/share/cubecheck/assets/", "644"],
+    ["../LICENSE.md", "usr/share/doc/cubecheck/", "644"],
+]

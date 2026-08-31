@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>CubeCheck.Installer</RootNamespace>
+    <AssemblyName>CubeCheck-Setup</AssemblyName>
+    <UseWPF>true</UseWPF>
+    <ApplicationIcon>..\..\assets\cubecheck.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <StartupObject>CubeCheck.Installer.Program</StartupObject>
+    <DefineConstants>$(DefineConstants);DISABLE_GENERATED_MAIN</DefineConstants>
+    <Version>1.1.0</Version>
+    <InformationalVersion>1.1 beta</InformationalVersion>
+    <SelfContained>false</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>false</IncludeNativeLibrariesForSelfExtract>
+    <IncludeAllContentForSelfExtract>false</IncludeAllContentForSelfExtract>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <RollForward>LatestMinor</RollForward>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\LICENSE.md" Link="LICENSE.md" />
+    <None Include="setup.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Remove="**\*.zip" />
+    <None Remove="**\*.zip" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(OfflinePayloadZip)' != '' and Exists('$(OfflinePayloadZip)')">
+    <EmbeddedResource Include="$(OfflinePayloadZip)">
+      <LogicalName>CubeCheck.Installer.payload.zip</LogicalName>
+      <Link>embedded-payload.zip</Link>
+    </EmbeddedResource>
+  </ItemGroup>
+</Project>

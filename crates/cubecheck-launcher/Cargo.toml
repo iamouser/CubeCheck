@@ -1,6 +1,6 @@
 [package]
 name = "cubecheck-launcher"
-version = "1.0.0-beta"
+version = "1.1.0-beta"
 edition = "2021"
 authors = ["AuraStudio", "AnProject"]
 description = "CubeCheck universal launcher (std only)"

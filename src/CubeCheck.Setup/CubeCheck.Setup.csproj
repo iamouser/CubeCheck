@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>CubeCheck.Setup</RootNamespace>
+    <AssemblyName>CubeCheck-Setup</AssemblyName>
+    <ApplicationIcon>..\..\assets\cubecheck.ico</ApplicationIcon>
+    <ApplicationManifest>..\CubeCheck.App\app.manifest</ApplicationManifest>
+    <Version>1.1.0</Version>
+    <InformationalVersion>1.1 beta</InformationalVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CubeCheck.Core\CubeCheck.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\native\bin\cubecheck_native.dll" Link="cubecheck_native.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\native\bin\cubecheck_native.dll')" />
+  </ItemGroup>
+</Project>

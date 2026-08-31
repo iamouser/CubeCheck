@@ -1,0 +1,164 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="CubeCheck.Desktop.App"
+             RequestedThemeVariant="Dark">
+  <Application.Resources>
+    <SolidColorBrush x:Key="CcTrack" Color="#3A3A50"/>
+    <SolidColorBrush x:Key="CcBorder" Color="#3A3A55"/>
+    <SolidColorBrush x:Key="CcAccent" Color="#8A7AD8"/>
+    <SolidColorBrush x:Key="CcHandle" Color="#D0D0E8"/>
+    <SolidColorBrush x:Key="CcOutline" Color="#6A6A88"/>
+    <SolidColorBrush x:Key="CcInput" Color="#0C0C14"/>
+    <SolidColorBrush x:Key="CcSelect" Color="#252540"/>
+    <SolidColorBrush x:Key="CcFg" Color="#E0E0F0"/>
+
+    <ControlTheme x:Key="AccentButton" TargetType="Button">
+      <Setter Property="Padding" Value="10,6"/>
+      <Setter Property="MinWidth" Value="110"/>
+      <Setter Property="MinHeight" Value="32"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="6"
+                  Padding="{TemplateBinding Padding}">
+            <ContentPresenter HorizontalAlignment="Center"
+                              VerticalAlignment="Center"
+                              Content="{TemplateBinding Content}"
+                              ContentTemplate="{TemplateBinding ContentTemplate}"/>
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </ControlTheme>
+
+    <ControlTheme x:Key="NavButton" TargetType="Button">
+      <Setter Property="HorizontalContentAlignment" Value="Left"/>
+      <Setter Property="Padding" Value="8,6"/>
+      <Setter Property="Height" Value="28"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="4"
+                  Padding="{TemplateBinding Padding}">
+            <ContentPresenter HorizontalAlignment="Left"
+                              VerticalAlignment="Center"
+                              Content="{TemplateBinding Content}"
+                              ContentTemplate="{TemplateBinding ContentTemplate}"/>
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </ControlTheme>
+
+    <ControlTheme x:Key="CcCheck" TargetType="CheckBox">
+      <Setter Property="Foreground" Value="{DynamicResource CcFg}"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="Template">
+        <ControlTemplate>
+          <StackPanel Orientation="Horizontal">
+            <Border Name="box" Width="16" Height="16" CornerRadius="3"
+                    Background="{DynamicResource CcInput}"
+                    BorderBrush="{DynamicResource CcOutline}" BorderThickness="1">
+              <Path Name="mark" Data="M3,8 L7,12 L13,4" Stroke="{DynamicResource CcAccent}"
+                    StrokeThickness="2" IsVisible="False" Stretch="None"/>
+            </Border>
+            <ContentPresenter Margin="8,0,0,0" VerticalAlignment="Center"
+                              Content="{TemplateBinding Content}"
+                              ContentTemplate="{TemplateBinding ContentTemplate}"/>
+          </StackPanel>
+        </ControlTemplate>
+      </Setter>
+      <Style Selector="^:checked /template/ Path#mark">
+        <Setter Property="IsVisible" Value="True"/>
+      </Style>
+      <Style Selector="^:checked /template/ Border#box">
+        <Setter Property="Background" Value="{DynamicResource CcSelect}"/>
+      </Style>
+    </ControlTheme>
+
+    <ControlTheme x:Key="CcRadio" TargetType="RadioButton">
+      <Setter Property="Foreground" Value="{DynamicResource CcFg}"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Margin" Value="0,0,0,6"/>
+      <Setter Property="Template">
+        <ControlTemplate>
+          <StackPanel Orientation="Horizontal">
+            <Grid Width="16" Height="16">
+              <Ellipse Name="outer" Stroke="{DynamicResource CcOutline}" StrokeThickness="1"
+                       Fill="{DynamicResource CcInput}"/>
+              <Ellipse Name="inner" Width="8" Height="8" Fill="{DynamicResource CcAccent}"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="False"/>
+            </Grid>
+            <ContentPresenter Margin="8,0,0,0" VerticalAlignment="Center"
+                              Content="{TemplateBinding Content}"
+                              ContentTemplate="{TemplateBinding ContentTemplate}"/>
+          </StackPanel>
+        </ControlTemplate>
+      </Setter>
+      <Style Selector="^:checked /template/ Ellipse#inner">
+        <Setter Property="IsVisible" Value="True"/>
+      </Style>
+    </ControlTheme>
+
+    <ControlTheme x:Key="CcSlider" TargetType="Slider">
+      <Setter Property="Height" Value="22"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Grid VerticalAlignment="Center">
+            <Border Height="6" CornerRadius="3" VerticalAlignment="Center"
+                    Background="{DynamicResource CcTrack}"
+                    BorderBrush="{DynamicResource CcBorder}" BorderThickness="1"/>
+            <Track Name="PART_Track"
+                   Minimum="{TemplateBinding Minimum}"
+                   Maximum="{TemplateBinding Maximum}"
+                   Value="{TemplateBinding Value, Mode=TwoWay}"
+                   Orientation="Horizontal">
+              <Track.DecreaseButton>
+                <RepeatButton Name="PART_DecreaseButton" Focusable="False">
+                  <RepeatButton.Template>
+                    <ControlTemplate>
+                      <Border Height="6" CornerRadius="3,0,0,3" VerticalAlignment="Center"
+                              Background="{DynamicResource CcAccent}"/>
+                    </ControlTemplate>
+                  </RepeatButton.Template>
+                </RepeatButton>
+              </Track.DecreaseButton>
+              <Track.Thumb>
+                <Thumb Width="14" Height="14">
+                  <Thumb.Template>
+                    <ControlTemplate>
+                      <Ellipse Fill="{DynamicResource CcHandle}"
+                               Stroke="{DynamicResource CcOutline}" StrokeThickness="1"/>
+                    </ControlTemplate>
+                  </Thumb.Template>
+                </Thumb>
+              </Track.Thumb>
+              <Track.IncreaseButton>
+                <RepeatButton Name="PART_IncreaseButton" Focusable="False">
+                  <RepeatButton.Template>
+                    <ControlTemplate>
+                      <Border Background="Transparent"/>
+                    </ControlTemplate>
+                  </RepeatButton.Template>
+                </RepeatButton>
+              </Track.IncreaseButton>
+            </Track>
+          </Grid>
+        </ControlTemplate>
+      </Setter>
+    </ControlTheme>
+  </Application.Resources>
+  <Application.Styles>
+    <FluentTheme/>
+  </Application.Styles>
+</Application>

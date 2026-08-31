@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>CubeCheck.Desktop</RootNamespace>
+    <AssemblyName>cubecheck</AssemblyName>
+    <ApplicationIcon>..\..\assets\cubecheck.ico</ApplicationIcon>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <Version>1.1.0</Version>
+    <InformationalVersion>1.1 beta</InformationalVersion>
+    <RuntimeIdentifiers>linux-x64;osx-x64;osx-arm64;win-x64</RuntimeIdentifiers>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.2.5" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.2.5" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.5" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CubeCheck.Core\CubeCheck.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\assets\tools.json" Link="assets\tools.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\assets\settings.default.json" Link="assets\settings.default.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\assets\cubecheck.ico" Link="assets\cubecheck.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

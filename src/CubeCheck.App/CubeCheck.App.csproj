@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFrameworks>net8.0-windows;net48</TargetFrameworks>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>CubeCheck.App</RootNamespace>
+    <AssemblyName>cubecheck</AssemblyName>
+    <ApplicationIcon>..\..\assets\cubecheck.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>1.1.0</Version>
+    <InformationalVersion>1.1 beta</InformationalVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CubeCheck.Core\CubeCheck.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\assets\tools.json" Link="assets\tools.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\assets\settings.default.json" Link="assets\settings.default.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\assets\cubecheck.ico" Link="assets\cubecheck.ico" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\native\bin\cubecheck_native.dll" Link="cubecheck_native.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\native\bin\cubecheck_native.dll')" />
+  </ItemGroup>
+</Project>

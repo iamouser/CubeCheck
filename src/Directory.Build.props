@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <Company>AuraStudio, AnProject</Company>
+    <Product>CubeCheck</Product>
+    <Copyright>2026 AuraStudio, AnProject</Copyright>
+    <Version>1.1.0</Version>
+    <InformationalVersion>1.1 beta</InformationalVersion>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+</Project>

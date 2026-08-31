@@ -1,1323 +1,1014 @@
-﻿[CmdletBinding()]
+﻿# CubeCheck multi-platform build
+# Default (all|release|universal): real installers in build\ (no zip named setup):
+#   CubeCheck-<ver>-universal-windows-setup.exe            thin WPF, HTTPS GitHub payload
+#   CubeCheck-<ver>-universal-windows-offline-setup.exe    same wizard, embedded zip, no HTTP
+#   CubeCheck-<ver>-universal-linux-setup.run              install.sh + ELF, may download
+#   CubeCheck-<ver>-universal-linux-offline-setup.run      ELF + assets/bin, no download
+#   CubeCheck-<ver>-universal-macos-setup.run              install script; README if no Mach-O
+#   CubeCheck-<ver>-universal-macos-offline-setup.run      Darwin portables, no download
+#   CubeCheck-<ver>-universal-macos-README.txt
+#   CubeCheck-<ver>-github-payload.zip
+# Other targets: github | installer | wizard | windows-x64 | windows-x86 | linux-x64 | ...
+# Linux/macOS UI = Rust egui ELF/Mach-O. Avalonia publish is not a release product.
+# CubeCheck.Installer = thin WPF FDD wizard (online downloads GitHub payload; offline embeds zip).
 param(
     [Parameter(Position = 0)]
-    [string]$Target = "windows-x64"
+    [string]$Target = "all"
 )
 
 $ErrorActionPreference = "Stop"
-$Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-Set-Location $Root
+$root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$dotnet = Join-Path $root "src"
+$native = Join-Path $dotnet "native"
+$outNative = Join-Path $native "bin"
+$dist = Join-Path $root "dist"
+$buildOut = Join-Path $root "build"
+$Version = "1.1.0-beta"
+$cfg = "Release"
 
-$script:Results = @()
-$HostTriple = "x86_64-pc-windows-msvc"
-try {
-    $v = & rustc -vV 2>$null
-    $line = $v | Where-Object { $_ -like "host:*" } | Select-Object -First 1
-    if ($line) { $HostTriple = ($line -split ":", 2)[1].Trim() }
-} catch {}
+New-Item -ItemType Directory -Force -Path $outNative, $dist, $buildOut | Out-Null
 
-function Get-AppVersion {
-    $toml = Get-Content (Join-Path $Root "Cargo.toml") -Raw
-    if ($toml -match '(?m)^version\s*=\s*"([^"]+)"') { return $Matches[1] }
-    return "1.0.0-beta"
-}
+function Info($m) { Write-Host "==> $m" }
+function Warn($m) { Write-Host "WARN: $m" }
 
-$Version = Get-AppVersion
-$Dist = Join-Path $Root "dist"
-$BuildOut = Join-Path $Root "build"
-$VendorList = Join-Path $Root "scripts\vendor-files.txt"
-
-function Write-Info($msg) { Write-Host $msg }
-function Write-Warn($msg) { Write-Host "WARNING: $msg" -ForegroundColor Yellow }
-function Write-Err($msg) { Write-Host "ERROR: $msg" -ForegroundColor Red }
-
-function Record-Result($name, $status, $detail) {
-    $script:Results += [pscustomobject]@{ Name = $name; Status = $status; Detail = $detail }
-}
-
-function Ensure-Cargo {
-    if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
-        throw "Rust/cargo not found. Install from https://rustup.rs"
-    }
-}
-
-function Ensure-RustupTarget($triple) {
-    $installed = & rustup target list --installed 2>$null
-    if ($installed -notcontains $triple) {
-        Write-Info "rustup target add $triple"
-        & rustup target add $triple
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to add Rust target $triple"
-        }
-    }
-}
-
-function Get-CargoBin($triple, $binName, $targetDir = "target") {
-    $exe = if ($binName -notmatch '\.(exe|dll)$' -and $triple -like "*windows*") { "$binName.exe" } else { $binName }
-    if ($triple -and $triple -ne $HostTriple) {
-        return Join-Path $Root "$targetDir\$triple\release\$exe"
-    }
-    return Join-Path $Root "$targetDir\release\$exe"
-}
-
-function Invoke-CargoBuild {
-    param(
-        [string[]]$CargoArgs,
-        [string]$FailMessage
-    )
-    Write-Info ("cargo " + ($CargoArgs -join " "))
-    & cargo @CargoArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw $FailMessage
-    }
-}
-
-function Copy-FileForce($src, $dst) {
-    $dir = Split-Path -Parent $dst
-    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
-    Copy-Item -LiteralPath $src -Destination $dst -Force
-}
-
-function Reset-NativeExit {
-    $global:LASTEXITCODE = 0
+function Zip-Dir($src, $zip) {
+    if (Test-Path $zip) { Remove-Item $zip -Force }
+    Compress-Archive -Path (Join-Path $src "*") -DestinationPath $zip -Force
 }
 
 function Copy-Tree($src, $dst) {
-    if (Test-Path -LiteralPath $dst) {
-        Remove-Item -LiteralPath $dst -Recurse -Force
-    }
-    New-Item -ItemType Directory -Path $dst -Force | Out-Null
-    if (Test-Path -LiteralPath $src) {
-        & robocopy $src $dst /E /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
-        if ($LASTEXITCODE -ge 8) {
-            throw "robocopy failed ($LASTEXITCODE) $src -> $dst"
-        }
-        Reset-NativeExit
-    }
+    if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $dst | Out-Null
+    Copy-Item -Path (Join-Path $src "*") -Destination $dst -Recurse -Force
 }
 
-function Write-SkipReadme($dir, $kind, $detail) {
-    if (-not (Test-Path -LiteralPath $dir)) {
-        New-Item -ItemType Directory -Path $dir | Out-Null
+function Use-MsvcEnv([string]$Arch) {
+    $msvcRoot = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC"
+    if (-not (Test-Path $msvcRoot)) {
+        $msvcRoot = "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC"
     }
-    $txt = @"
-CubeCheck '$kind' was not compiled on this machine.
+    $msvcDirs = @(Get-ChildItem $msvcRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object {
+            (Test-Path (Join-Path $_.FullName "include\excpt.h")) -and
+            (Test-Path (Join-Path $_.FullName "bin\Hostx64\x64\cl.exe"))
+        })
+    # NativeAOT / ILC on this machine is wired to MSVC 14.39; prefer it over newer toolsets.
+    $msvc = $msvcDirs | Where-Object { $_.Name -like "14.39*" } | Sort-Object Name -Descending | Select-Object -First 1
+    if (-not $msvc) {
+        $msvc = $msvcDirs | Sort-Object Name -Descending | Select-Object -First 1
+    }
+    if (-not $msvc) { throw "MSVC не найден (нужен Visual Studio Build Tools с C++: cl.exe + excpt.h)" }
+    $msvc = $msvc.FullName
+    $sdkRoot = "C:\Program Files (x86)\Windows Kits\10"
+    $sdkVer = Get-ChildItem (Join-Path $sdkRoot "Include") -Directory |
+        Where-Object { Test-Path (Join-Path $_.FullName "um\windows.h") } |
+        Sort-Object Name -Descending |
+        Select-Object -First 1
+    if (-not $sdkVer) { throw "Windows SDK не найден" }
+    $ver = $sdkVer.Name
+    $hostCl = if ($Arch -eq "x86") { "x86" } else { "x64" }
+    $cl = Join-Path $msvc "bin\Hostx64\$hostCl\cl.exe"
+    if (-not (Test-Path $cl)) { $cl = Join-Path $msvc "bin\Hostx64\x64\cl.exe" }
 
-$detail
-
-This folder is a pack layout / recipe, not a fake native binary.
-Rebuild on the matching OS, or install cargo-zigbuild + zig (Linux) / an Apple SDK (macOS):
-
-  build.bat $kind
-  build.sh $kind
-"@
-    Set-Content -LiteralPath (Join-Path $dir "README.txt") -Value $txt -Encoding utf8
+    $env:INCLUDE = "$msvc\include;$sdkRoot\Include\$ver\ucrt;$sdkRoot\Include\$ver\um;$sdkRoot\Include\$ver\shared"
+    $env:LIB = "$msvc\lib\$Arch;$sdkRoot\Lib\$ver\ucrt\$Arch;$sdkRoot\Lib\$ver\um\$Arch"
+    $env:PATH = "$(Join-Path $msvc "bin\Hostx64\$hostCl");$(Join-Path $msvc "bin\Hostx64\x64");" + $env:PATH
+    return $cl
 }
 
-function Get-ReleaseFileName([string]$suffix) {
-    return "CubeCheck-$Version-$suffix"
-}
+function Compile-Native([string]$Arch) {
+    $cl = Use-MsvcEnv $Arch
 
-function Test-FileMagic([string]$path, [byte[]]$magic) {
-    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
-    if (-not (Test-Path -LiteralPath $path)) { return $false }
-    $item = Get-Item -LiteralPath $path
-    if ($item.PSIsContainer -or $item.Length -lt $magic.Length) { return $false }
-    $fs = [IO.File]::OpenRead($path)
+    $outDir = Join-Path $outNative $Arch
+    New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+    $machine = if ($Arch -eq "x86") { "/MACHINE:X86" } else { "/MACHINE:X64" }
+
+    Info "C++ cubecheck_native.dll ($Arch, Win7+)"
+    Push-Location $outDir
     try {
-        $buf = New-Object byte[] $magic.Length
-        $n = $fs.Read($buf, 0, $magic.Length)
-        if ($n -lt $magic.Length) { return $false }
-        for ($i = 0; $i -lt $magic.Length; $i++) {
-            if ($buf[$i] -ne $magic[$i]) { return $false }
-        }
-        return $true
-    } finally { $fs.Dispose() }
-}
+        & $cl /nologo /LD /O2 /EHsc /std:c++17 /utf-8 /MT `
+            /DWINVER=0x0601 /D_WIN32_WINNT=0x0601 /DCUBCHECK_NATIVE_EXPORTS `
+            /I (Join-Path $native "include") `
+            (Join-Path $native "src\dllmain.cpp") `
+            (Join-Path $native "src\win32.cpp") `
+            (Join-Path $native "src\scan.cpp") `
+            /Fe:cubecheck_native.dll `
+            /link /DLL $machine /SUBSYSTEM:WINDOWS,6.01 `
+            wintrust.lib crypt32.lib ole32.lib shell32.lib advapi32.lib user32.lib kernel32.lib
+        if ($LASTEXITCODE -ne 0) { throw "Сборка native DLL $Arch не удалась" }
 
-function Test-RealDeb([string]$path) {
-    Test-FileMagic $path ([byte[]](0x21, 0x3C, 0x61, 0x72, 0x63, 0x68, 0x3E))
-}
-
-function Test-Elf([string]$path) {
-    Test-FileMagic $path ([byte[]](0x7F, 0x45, 0x4C, 0x46))
-}
-
-function Test-MachO([string]$path) {
-    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
-    if (-not (Test-Path -LiteralPath $path)) { return $false }
-    $item = Get-Item -LiteralPath $path
-    if ($item.PSIsContainer -or $item.Length -lt 4) { return $false }
-    $fs = [IO.File]::OpenRead($path)
-    try {
-        $buf = New-Object byte[] 4
-        [void]$fs.Read($buf, 0, 4)
-        $be = ([uint32]$buf[0] -shl 24) -bor ([uint32]$buf[1] -shl 16) -bor ([uint32]$buf[2] -shl 8) -bor [uint32]$buf[3]
-        return @(
-            [uint32]0xFEEDFACE, [uint32]0xCEFAEDFE, [uint32]0xFEEDFACF,
-            [uint32]0xCFFAEDFE, [uint32]0xCAFEBABE, [uint32]0xBEBAFECA
-        ) -contains $be
-    } finally { $fs.Dispose() }
-}
-
-function Test-LinuxShInstaller([string]$path) {
-    if (-not (Test-Path -LiteralPath $path)) { return $false }
-    $item = Get-Item -LiteralPath $path
-    if ($item.PSIsContainer -or $item.Length -lt 50000) { return $false }
-    $fs = [IO.File]::OpenRead($path)
-    try {
-        $head = New-Object byte[] 2
-        if ($fs.Read($head, 0, 2) -lt 2) { return $false }
-        if ($head[0] -ne 0x23 -or $head[1] -ne 0x21) { return $false } # #!
-        $fs.Position = 0
-        $chunk = New-Object byte[] 65536
-        $carry = New-Object byte[] 0
-        $foundGz = $false
-        while (($n = $fs.Read($chunk, 0, $chunk.Length)) -gt 0) {
-            $data = New-Object byte[] ($carry.Length + $n)
-            [Array]::Copy($carry, 0, $data, 0, $carry.Length)
-            [Array]::Copy($chunk, 0, $data, $carry.Length, $n)
-            for ($i = 0; $i -le $data.Length - 2; $i++) {
-                if ($data[$i] -eq 0x1F -and $data[$i + 1] -eq 0x8B) { $foundGz = $true; break }
-            }
-            if ($foundGz) { break }
-            $keep = [Math]::Min(1, $data.Length)
-            $carry = New-Object byte[] $keep
-            [Array]::Copy($data, $data.Length - $keep, $carry, 0, $keep)
-        }
-        return $foundGz
-    } finally { $fs.Dispose() }
-}
-
-function Write-UnixText([string]$path, [string]$text) {
-    $n = ($text -replace "`r`n", "`n") -replace "`r", "`n"
-    if (-not $n.EndsWith("`n")) { $n += "`n" }
-    [IO.File]::WriteAllBytes($path, [Text.Encoding]::UTF8.GetBytes($n))
-}
-
-function Get-LinuxShHeader([int]$skip, [string]$kind) {
-    $tpl = Get-Content -LiteralPath (Join-Path $Root "scripts\linux-sh-header.sh") -Raw
-    return (($tpl -replace '@VERSION@', $Version) -replace '@KIND@', $kind) -replace '@SKIP@', "$skip"
-}
-
-function Pack-LinuxShFromStage([string]$stage, [string]$outSh, [string]$kind) {
-    $have = $false
-    if (Test-Elf (Join-Path $stage "cubecheck")) { $have = $true }
-    foreach ($id in @("linux-x64", "linux-x86")) {
-        if (Test-Elf (Join-Path $stage "payload\$id\cubecheck")) { $have = $true }
-    }
-    if (-not $have) {
-        Write-Warn "pack .sh skipped: no ELF in $stage"
-        return $null
-    }
-
-    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("cubecheck-sh-" + [guid]::NewGuid().ToString("n"))
-    New-Item -ItemType Directory -Path $tmp | Out-Null
-    try {
-        $tgz = Join-Path $tmp "payload.tar.gz"
-        Push-Location $stage
-        try {
-            Reset-NativeExit
-            & tar -czf $tgz *
-            if ($LASTEXITCODE -ne 0) {
-                Reset-NativeExit
-                & tar -a -cf $tgz *
-            }
-            if ($LASTEXITCODE -ne 0) { throw "tar.gz for .sh failed" }
-        } finally { Pop-Location }
-
-        $headerPath = Join-Path $tmp "header.sh"
-        $skip = 0
-        for ($pass = 0; $pass -lt 5; $pass++) {
-            $hdr = Get-LinuxShHeader $skip $kind
-            $hdr = ($hdr -replace "`r`n", "`n") -replace "`r", "`n"
-            if (-not $hdr.EndsWith("`n")) { $hdr += "`n" }
-            $lineCount = ([regex]::Matches($hdr, "`n")).Count
-            $newSkip = $lineCount + 1
-            Write-UnixText $headerPath $hdr
-            if ($newSkip -eq $skip) { break }
-            $skip = $newSkip
-        }
-
-        $outDir = Split-Path -Parent $outSh
-        if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir | Out-Null }
-        $out = [IO.File]::Create($outSh)
-        try {
-            $h = [IO.File]::OpenRead($headerPath)
-            try { $h.CopyTo($out) } finally { $h.Dispose() }
-            $t = [IO.File]::OpenRead($tgz)
-            try { $t.CopyTo($out) } finally { $t.Dispose() }
-        } finally { $out.Dispose() }
-
-        if (-not (Test-LinuxShInstaller $outSh)) {
-            Remove-Item -LiteralPath $outSh -Force -ErrorAction SilentlyContinue
-            throw "refusing dummy .sh (missing shebang/gzip payload): $outSh"
-        }
-        Write-Info "packed $outSh"
-        return $outSh
-    } finally {
-        Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
-    }
-}
-
-function Pack-LinuxShSingle([string]$elf, [string]$outSh, [string]$kind) {
-    if (-not (Test-Elf $elf)) { return $null }
-    $stage = Join-Path $Dist ("sh-stage-" + $kind)
-    if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
-    New-Item -ItemType Directory -Path $stage | Out-Null
-    Copy-FileForce $elf (Join-Path $stage "cubecheck")
-    Copy-CoreAssets (Join-Path $stage "assets")
-    $lic = Join-Path $Root "LICENSE.md"
-    if (Test-Path -LiteralPath $lic) { Copy-FileForce $lic (Join-Path $stage "LICENSE.md") }
-    return Pack-LinuxShFromStage $stage $outSh $kind
-}
-
-function Clear-BuildOut {
-    if (-not (Test-Path -LiteralPath $BuildOut)) {
-        New-Item -ItemType Directory -Path $BuildOut | Out-Null
-        return
-    }
-    $items = @(Get-ChildItem -LiteralPath $BuildOut -Force)
-    foreach ($item in ($items | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })) {
-        $p = $item.FullName
-        if ($item.PSIsContainer) { cmd /c "rmdir `"$p`"" | Out-Null }
-        else { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue }
-    }
-    foreach ($item in ($items | Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) })) {
-        Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction SilentlyContinue
-    }
-}
-
-function Publish-ReleaseFile([string]$src, [string]$destName) {
-    if (-not $src -or -not (Test-Path -LiteralPath $src)) { return $false }
-    if ((Get-Item -LiteralPath $src).PSIsContainer) { return $false }
-    if (-not (Test-Path -LiteralPath $BuildOut)) {
-        New-Item -ItemType Directory -Path $BuildOut | Out-Null
-    }
-    Copy-FileForce $src (Join-Path $BuildOut $destName)
-    Write-Info "release: $destName"
-    return $true
-}
-
-function Show-ReleaseBuild {
-    Write-Host ""
-    Write-Host "build/ (GitHub Release assets):"
-    $files = @(Get-ChildItem -LiteralPath $BuildOut -Force -ErrorAction SilentlyContinue)
-    if ($files.Count -eq 0) {
-        Write-Host "  (empty)"
-        return
-    }
-    $bad = @()
-    foreach ($f in $files) {
-        if ($f.PSIsContainer -or ($f.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-            $bad += $f.Name
-            Write-Host ("  {0,-12}  {1}  << not a release file" -f $f.Length, $f.Name) -ForegroundColor Yellow
-        } else {
-            Write-Host ("  {0,12:N0}  {1}" -f $f.Length, $f.Name)
+        if ($Arch -eq "x64") {
+            Info "C++ cubecheck-launcher.exe (Win7+)"
+            & $cl /nologo /O2 /EHsc /std:c++17 /utf-8 /MT `
+                /DWINVER=0x0601 /D_WIN32_WINNT=0x0601 `
+                (Join-Path $native "src\launcher.cpp") `
+                /Fe:cubecheck-launcher.exe `
+                /link /SUBSYSTEM:WINDOWS,6.01 user32.lib shell32.lib
+            if ($LASTEXITCODE -ne 0) { throw "Сборка launcher не удалась" }
+            Copy-Item "cubecheck-launcher.exe" (Join-Path $outNative "cubecheck-launcher.exe") -Force
+            Copy-Item "cubecheck_native.dll" (Join-Path $outNative "cubecheck_native.dll") -Force
         }
     }
-    if ($bad.Count -gt 0) {
-        Write-Warn ("build/ should only contain downloadable files, not: " + ($bad -join ", "))
-    }
-}
-
-function Pack-WindowsPortable([string]$distName, [string]$exeSrc) {
-    $outDir = Join-Path $Dist $distName
-    $stageRoot = Join-Path $outDir "portable"
-    $bundle = Join-Path $stageRoot "CubeCheck"
-    if (Test-Path -LiteralPath $stageRoot) { Remove-Item -LiteralPath $stageRoot -Recurse -Force }
-    New-Item -ItemType Directory -Path $bundle | Out-Null
-    Copy-FileForce $exeSrc (Join-Path $bundle "cubecheck.exe")
-    Copy-CoreAssets (Join-Path $bundle "assets")
-    $lic = Join-Path $Root "LICENSE.md"
-    if (Test-Path -LiteralPath $lic) { Copy-FileForce $lic (Join-Path $bundle "LICENSE.md") }
-    $zip = Join-Path $outDir (Get-ReleaseFileName "$distName.zip")
-    Compress-Dir $bundle $zip
-    return $zip
-}
-
-function Pack-MacosZip {
-    $bin = Join-Path $Dist "macos-universal\cubecheck-macos-universal"
-    if (-not (Test-MachO $bin)) { return $null }
-    $stageRoot = Join-Path $Dist "macos-universal\portable"
-    $bundle = Join-Path $stageRoot "CubeCheck"
-    if (Test-Path -LiteralPath $stageRoot) { Remove-Item -LiteralPath $stageRoot -Recurse -Force }
-    New-Item -ItemType Directory -Path $bundle | Out-Null
-    Copy-FileForce $bin (Join-Path $bundle "cubecheck")
-    foreach ($slice in @(
-        @{ src = "macos-arm64\cubecheck-macos-arm64"; name = "cubecheck-arm64" },
-        @{ src = "macos-x64\cubecheck-macos-x64"; name = "cubecheck-x64" }
-    )) {
-        $p = Join-Path $Dist $slice.src
-        if (Test-MachO $p) {
-            Copy-FileForce $p (Join-Path $bundle $slice.name)
-        }
-    }
-    Copy-CoreAssets (Join-Path $bundle "assets")
-    $lic = Join-Path $Root "LICENSE.md"
-    if (Test-Path -LiteralPath $lic) { Copy-FileForce $lic (Join-Path $bundle "LICENSE.md") }
-    $zip = Join-Path $Dist "macos-universal\$(Get-ReleaseFileName 'macos-universal.zip')"
-    Compress-Dir $bundle $zip
-    return $zip
-}
-
-function Publish-ReleaseAssets {
-    Clear-BuildOut
-
-    foreach ($win in @("windows-x64", "windows-x86")) {
-        $dir = Join-Path $Dist $win
-        $setup = @(
-            (Join-Path $dir "CubeCheck-Setup-$win.exe"),
-            (Join-Path $dir "CubeCheck-Setup.exe")
-        ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-        if ($setup) {
-            [void](Publish-ReleaseFile $setup (Get-ReleaseFileName "$win-setup.exe"))
-            if ($win -eq "windows-x64") {
-                [void](Publish-ReleaseFile $setup "CubeCheck-Setup.exe")
-            }
-        }
-        $exe = Join-Path $dir "cubecheck-$win.exe"
-        if (Test-Path -LiteralPath $exe) {
-            $zip = Pack-WindowsPortable $win $exe
-            [void](Publish-ReleaseFile $zip (Get-ReleaseFileName "$win.zip"))
-        }
-    }
-
-    $debPairs = @(
-        @{ Name = "linux-deb-x64"; Arch = "amd64" },
-        @{ Name = "linux-deb-x86"; Arch = "i386" }
-    )
-    foreach ($pair in $debPairs) {
-        $deb = Join-Path $Dist "$($pair.Name)\cubecheck_${Version}_$($pair.Arch).deb"
-        $pkgBin = Join-Path $Dist "$($pair.Name)\pkg\usr\bin\cubecheck"
-        if ((Test-RealDeb $deb) -and (Test-Elf $pkgBin)) {
-            [void](Publish-ReleaseFile $deb (Get-ReleaseFileName "$($pair.Name).deb"))
-        }
-    }
-
-    $shPairs = @(
-        @{ Dist = "linux-deb-x64"; Kind = "linux-x64"; Elf = (Join-Path $Dist "linux-deb-x64\cubecheck-linux-deb-x64") },
-        @{ Dist = "linux-deb-x86"; Kind = "linux-x86"; Elf = (Join-Path $Dist "linux-deb-x86\cubecheck-linux-deb-x86") }
-    )
-    foreach ($pair in $shPairs) {
-        $sh = Join-Path $Dist "$($pair.Dist)\$(Get-ReleaseFileName "$($pair.Kind).sh")"
-        if (-not ((Test-Path -LiteralPath $sh) -and (Test-LinuxShInstaller $sh))) {
-            if (Test-Elf $pair.Elf) {
-                try { [void](Pack-LinuxShSingle $pair.Elf $sh $pair.Kind) } catch { Write-Warn $_.Exception.Message }
-            }
-        }
-        if ((Test-Path -LiteralPath $sh) -and (Test-LinuxShInstaller $sh)) {
-            [void](Publish-ReleaseFile $sh (Get-ReleaseFileName "$($pair.Kind).sh"))
-        }
-    }
-
-    $uniSh = Join-Path $Dist "linux-universal\$(Get-ReleaseFileName 'linux-universal.sh')"
-    if ((Test-Path -LiteralPath $uniSh) -and (Test-LinuxShInstaller $uniSh)) {
-        [void](Publish-ReleaseFile $uniSh (Get-ReleaseFileName "linux-universal.sh"))
-    }
-
-    $macZip = Pack-MacosZip
-    if ($macZip) {
-        [void](Publish-ReleaseFile $macZip (Get-ReleaseFileName "macos-universal.zip"))
-    }
-
-    foreach ($uni in @("universal", "universal-local")) {
-        $dir = Join-Path $Dist $uni
-        $zipVer = Join-Path $dir (Get-ReleaseFileName "$uni.zip")
-        $zip = Join-Path $dir "CubeCheck-$uni.zip"
-        $src = if (Test-Path -LiteralPath $zipVer) { $zipVer } elseif (Test-Path -LiteralPath $zip) { $zip } else { $null }
-        if ($src) {
-            [void](Publish-ReleaseFile $src (Get-ReleaseFileName "$uni.zip"))
-        }
-    }
-}
-
-function Write-Marker($path, $text = "") {
-    $dir = Split-Path -Parent $path
-    if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
-    Set-Content -LiteralPath $path -Value $text -Encoding ascii
-}
-
-function Copy-CoreAssets($destAssets) {
-    if (-not (Test-Path $destAssets)) { New-Item -ItemType Directory -Path $destAssets | Out-Null }
-    Copy-FileForce (Join-Path $Root "assets\tools.json") (Join-Path $destAssets "tools.json")
-    $ico = Join-Path $Root "assets\cubecheck.ico"
-    if (Test-Path $ico) { Copy-FileForce $ico (Join-Path $destAssets "cubecheck.ico") }
-}
-
-function Get-RequiredVendorFiles {
-    Get-Content -LiteralPath $VendorList | ForEach-Object { $_.Trim() } | Where-Object { $_ -and $_ -notlike "#*" }
-}
-
-function Test-VendorFiles {
-    $missing = @()
-    foreach ($rel in (Get-RequiredVendorFiles)) {
-        $p = Join-Path $Root "assets\$rel"
-        if (-not (Test-Path -LiteralPath $p)) { $missing += $rel }
-    }
-    return $missing
-}
-
-function Copy-VendorAssets($destAssets) {
-    $missing = Test-VendorFiles
-    if ($missing.Count -gt 0) {
-        throw ("universal-local: missing vendor files in assets/:`n  " + ($missing -join "`n  ") + "`nDownload them once with a normal CubeCheck build (Components), then rebuild. Do not commit these files.")
-    }
-    foreach ($rel in (Get-RequiredVendorFiles)) {
-        $src = Join-Path $Root "assets\$rel"
-        $dst = Join-Path $destAssets $rel
-        Copy-FileForce $src $dst
-    }
-    foreach ($opt in @("Everything.ini", "SystemInformer\SystemInformer.exe.settings.xml")) {
-        $src = Join-Path $Root "assets\$opt"
-        if (Test-Path -LiteralPath $src) {
-            Copy-FileForce $src (Join-Path $destAssets $opt)
-        }
-    }
-}
-
-function Compress-Dir($folder, $archive) {
-    if (Test-Path $archive) { Remove-Item -LiteralPath $archive -Force }
-    $parent = Split-Path -Parent $folder
-    $name = Split-Path -Leaf $folder
-    Push-Location $parent
-    try {
-        & tar -a -c -f $archive $name
-        if ($LASTEXITCODE -ne 0) { throw "tar failed for $archive" }
-    } finally {
+    finally {
         Pop-Location
     }
 }
 
-function Write-Placeholder($dir, $kind) {
-    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
-    $txt = @"
-CubeCheck payload '$kind' was not built on this machine.
-
-On Windows this host can usually produce windows-x64 / windows-x86.
-Linux/macOS native binaries need a matching linker/SDK, zig, cross, or a CI job.
-
-  build.bat $kind
-  build.sh $kind
-
-The universal launcher will print a clear error if you start it on an OS
-whose payload is missing.
-"@
-    Set-Content -LiteralPath (Join-Path $dir "README.txt") -Value $txt -Encoding utf8
+function Publish-WinNet8([string]$Rid, [string]$OutDir) {
+    Info ".NET 8 WPF $Rid (Windows 10/11)"
+    New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+    dotnet publish (Join-Path $dotnet "CubeCheck.App\CubeCheck.App.csproj") `
+        -c $cfg -f net8.0-windows -r $Rid --self-contained true -o $OutDir
+    if ($LASTEXITCODE -ne 0) { throw "publish $Rid не удался" }
+    $arch = if ($Rid -eq "win-x86") { "x86" } else { "x64" }
+    Copy-Item (Join-Path $outNative "$arch\cubecheck_native.dll") (Join-Path $OutDir "cubecheck_native.dll") -Force
+    Set-Content -Path (Join-Path $OutDir ".portable") -Value ""
 }
 
-function Build-LauncherWindows {
-    Invoke-CargoBuild -CargoArgs @("build", "--release", "-p", "cubecheck-launcher") -FailMessage "launcher build failed"
-    $src = Join-Path $Root "target\release\cubecheck-launcher.exe"
-    if (-not (Test-Path $src)) {
-        $src = Get-CargoBin $HostTriple "cubecheck-launcher"
+function Publish-WinNet48([string]$Rid, [string]$OutDir) {
+    Info ".NET Framework 4.8 WPF $Rid (Windows 7/8/10/11)"
+    New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+    $pt = if ($Rid -eq "win-x86") { "x86" } else { "x64" }
+    dotnet publish (Join-Path $dotnet "CubeCheck.App\CubeCheck.App.csproj") `
+        -c $cfg -f net48 -r $Rid -o $OutDir /p:PlatformTarget=$pt
+    if ($LASTEXITCODE -ne 0) { throw "publish net48 $Rid не удался" }
+    Copy-Item (Join-Path $outNative "$pt\cubecheck_native.dll") (Join-Path $OutDir "cubecheck_native.dll") -Force
+    Set-Content -Path (Join-Path $OutDir ".portable") -Value ""
+}
+
+function Publish-Desktop([string]$Rid, [string]$OutDir) {
+    throw "Publish-Desktop ($Rid) отключён: Avalonia не является Linux/macOS продуктом. UI = Rust egui."
+}
+
+function Publish-Setup([string]$OutExe) {
+    Info "Rust cubecheck-setup (встраивает cubecheck.exe)"
+    Push-Location $root
+    try {
+        cargo build -p cubecheck --release --bin cubecheck-setup
+        if ($LASTEXITCODE -ne 0) { throw "Сборка cubecheck-setup не удалась" }
+    } finally {
+        Pop-Location
     }
-    if (-not (Test-Path $src)) { throw "cubecheck-launcher.exe not found after build" }
-    return $src
+    Copy-Item (Join-Path $root "target\release\cubecheck-setup.exe") $OutExe -Force
 }
 
-function Stage-WindowsGui {
-    param(
-        [string]$Triple,
-        [string]$DistName,
-        [string]$OutExeName,
-        [string]$TargetDir = "target",
-        [switch]$Offline,
-        [switch]$WithSetup
+function Remove-LegacyInstallRoot([string]$Dir) {
+    if (-not (Test-Path -LiteralPath $Dir)) { return }
+    foreach ($name in @("cubecheck_api.dll", "cubecheck_native.dll", "UnInstall.ico", "UnInstall.cmd")) {
+        $legacy = Join-Path $Dir $name
+        if (Test-Path -LiteralPath $legacy) {
+            try {
+                Remove-Item -LiteralPath $legacy -Force
+            } catch {
+                Warn "не удалось убрать $name из корня ${Dir}: $($_.Exception.Message)"
+            }
+        }
+    }
+}
+
+function Sanitize-WindowsPayload([string]$Dir) {
+    $keepRoot = @("cubecheck.exe", ".portable", "UnInstall.url")
+    $keepAssets = @(
+        "tools.json", "cubecheck.ico", "settings.default.json", "Everything.ini",
+        "UnInstall.ico", "UnInstall.cmd", "cubecheck_api.dll", "cubecheck_native.dll"
     )
-    Ensure-RustupTarget $Triple
-    $feat = @()
-    if ($Offline) { $feat = @("--features", "offline") }
-    $args = @("build", "--release", "-p", "cubecheck", "--bin", "cubecheck") + $feat
-    if ($TargetDir -ne "target") { $args += @("--target-dir", $TargetDir) }
-    if ($Triple -ne $HostTriple) { $args += @("--target", $Triple) }
-    Invoke-CargoBuild -CargoArgs $args -FailMessage "cubecheck ($DistName) build failed"
+    if (-not (Test-Path -LiteralPath $Dir)) { return }
 
-    $src = Get-CargoBin $Triple "cubecheck" $TargetDir
-    if (-not (Test-Path $src)) { throw "missing $src" }
+    Get-ChildItem -LiteralPath $Dir -Force | ForEach-Object {
+        if ($_.PSIsContainer) {
+            if ($_.Name -ne "assets") {
+                Remove-Item -LiteralPath $_.FullName -Recurse -Force
+            }
+        } elseif ($keepRoot -notcontains $_.Name) {
+            Remove-Item -LiteralPath $_.FullName -Force
+        }
+    }
 
-    $outDir = Join-Path $Dist $DistName
-    if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir | Out-Null }
-    $dest = Join-Path $outDir $OutExeName
-    Copy-FileForce $src $dest
-    Copy-CoreAssets (Join-Path $outDir "assets")
+    $assets = Join-Path $Dir "assets"
+    if (Test-Path -LiteralPath $assets) {
+        Get-ChildItem -LiteralPath $assets -Force | ForEach-Object {
+            if ($_.PSIsContainer -or ($keepAssets -notcontains $_.Name)) {
+                Remove-Item -LiteralPath $_.FullName -Recurse -Force
+            }
+        }
+    }
 
-    if ($WithSetup) {
-        $env:CUBECHECK_SETUP_PAYLOAD = (Resolve-Path -LiteralPath $src).Path
-        $setupSrc = $null
+    Get-ChildItem -LiteralPath $Dir -Recurse -Force -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -match '\.(pdb|xml|exp|lib|obj|ilk)$' } |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force }
+}
+
+function Write-UninstallHelpers([string]$Dir) {
+    $exe = Join-Path $Dir "cubecheck.exe"
+    if (-not (Test-Path -LiteralPath $exe)) { return }
+    $assets = Join-Path $Dir "assets"
+    New-Item -ItemType Directory -Force -Path $assets | Out-Null
+    $srcIco = Join-Path $root "assets\UnInstall.ico"
+    $ico = Join-Path $assets "UnInstall.ico"
+    if (Test-Path -LiteralPath $srcIco) {
         try {
-            $setupArgs = @("build", "--release", "-p", "cubecheck", "--bin", "cubecheck-setup", "--no-default-features")
-            if ($Triple -ne $HostTriple) { $setupArgs += @("--target", $Triple) }
-            Invoke-CargoBuild -CargoArgs $setupArgs -FailMessage "cubecheck-setup ($DistName) native build failed"
-            $setupSrc = Get-CargoBin $Triple "cubecheck-setup"
-            if (-not (Test-Path -LiteralPath $setupSrc)) { throw "missing $setupSrc" }
+            Copy-Item -LiteralPath $srcIco -Destination $ico -Force
         } catch {
-            if ($Triple -eq $HostTriple) { throw }
-            Write-Warn $_.Exception.Message
-            Write-Info "Building host cubecheck-setup that embeds $DistName payload"
-            $tdir = "target-setup-$DistName"
-            $setupArgs = @(
-                "build", "--release", "-p", "cubecheck", "--bin", "cubecheck-setup",
-                "--no-default-features", "--target-dir", $tdir
-            )
-            Invoke-CargoBuild -CargoArgs $setupArgs -FailMessage "cubecheck-setup host-embed for $DistName failed"
-            $setupSrc = Get-CargoBin $HostTriple "cubecheck-setup" $tdir
-            if (-not (Test-Path -LiteralPath $setupSrc)) { throw "missing $setupSrc" }
-        } finally {
-            Remove-Item Env:\CUBECHECK_SETUP_PAYLOAD -ErrorAction SilentlyContinue
-        }
-        Copy-FileForce $setupSrc (Join-Path $outDir "CubeCheck-Setup.exe")
-        Copy-FileForce $setupSrc (Join-Path $outDir "CubeCheck-Setup-$DistName.exe")
-        if ($DistName -eq "windows-x64") {
-            Copy-FileForce $setupSrc (Join-Path $Root "CubeCheck-Setup.exe")
-            Copy-FileForce $src (Join-Path $Root "cubecheck.exe")
+            Warn "не удалось записать UnInstall.ico: $($_.Exception.Message)"
         }
     }
-
-    return $dest
+    $srcCmd = Join-Path $root "assets\UnInstall.cmd"
+    $cmd = Join-Path $assets "UnInstall.cmd"
+    $cmdText = "@echo off`r`ncd /d `"%~dp0..`"`r`nstart `"`" `"%~dp0..\cubecheck.exe`" -uninstall`r`n"
+    if (Test-Path -LiteralPath $srcCmd) {
+        $cmdText = [System.IO.File]::ReadAllText($srcCmd)
+        if ($cmdText -notmatch '(?i)cubecheck\.exe') {
+            $cmdText = "@echo off`r`ncd /d `"%~dp0..`"`r`nstart `"`" `"%~dp0..\cubecheck.exe`" -uninstall`r`n"
+        }
+    }
+    [System.IO.File]::WriteAllText($cmd, $cmdText, (New-Object System.Text.UTF8Encoding $false))
+    $uri = ([Uri](Get-Item -LiteralPath $cmd).FullName).AbsoluteUri
+    $urlBody = "[InternetShortcut]`r`nURL=$uri`r`n"
+    if (Test-Path -LiteralPath $ico) {
+        $urlBody += "IconFile=$ico`r`nIconIndex=0`r`n"
+    }
+    [System.IO.File]::WriteAllText((Join-Path $Dir "UnInstall.url"), $urlBody, (New-Object System.Text.UTF8Encoding $false))
+    Remove-LegacyInstallRoot $Dir
 }
 
-function Get-ZigExe {
-    $cands = @()
-    $cmd = Get-Command zig -ErrorAction SilentlyContinue
-    if ($cmd) {
-        $cands += $cmd.Source
+function Copy-IfProgramFiles {
+    $pf = Join-Path ${env:ProgramFiles} "CubeCheck"
+    try {
+        New-Item -ItemType Directory -Force -Path $pf | Out-Null
+    } catch {
+        Warn "нет доступа к Program Files\CubeCheck: $($_.Exception.Message)"
+        return
+    }
+    $src = Join-Path $dist "windows-x64"
+    $exeFrom = Join-Path $src "cubecheck.exe"
+    if (-not (Test-Path -LiteralPath $exeFrom)) { $exeFrom = Join-Path $root "cubecheck.exe" }
+    if (Test-Path -LiteralPath $exeFrom) {
         try {
-            $item = Get-Item -LiteralPath $cmd.Source
-            if ($item.LinkType -and $item.Target) { $cands += [string]$item.Target }
-        } catch {}
-    }
-    $cands += @(
-        "C:\JumpWorld\tools\zig-copy\zig.exe",
-        "C:\JumpWorld\tools\zig\zig.exe"
-    )
-    $ascii = $cands | Where-Object { $_ -and (Test-Path -LiteralPath $_) -and ($_ -notmatch '[^\x00-\x7F]') } | Select-Object -First 1
-    if ($ascii) { return $ascii }
-    return ($cands | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1)
-}
-
-function Find-LinuxLinker($triple) {
-    # cargo-zigbuild Windows .bat wrappers break with non-ASCII user paths and
-    # `-fno-sanitize=all`. Prefer a tiny ASCII zig-cc.cmd when zig.exe exists.
-    if (Get-ZigExe) { return "zig" }
-    if (Get-Command cargo-zigbuild -ErrorAction SilentlyContinue) { return "zigbuild" }
-    if (Get-Command cross -ErrorAction SilentlyContinue) { return "cross" }
-    return $null
-}
-
-function Get-ZigCcTarget($triple) {
-    switch ($triple) {
-        "x86_64-unknown-linux-gnu" { "x86_64-linux-gnu.2.17" }
-        "i686-unknown-linux-gnu" { "x86-linux-gnu.2.17" }
-        "x86_64-apple-darwin" { "x86_64-macos" }
-        "aarch64-apple-darwin" { "aarch64-macos" }
-        default { $null }
-    }
-}
-
-function Find-AppleSdk {
-    $cands = @()
-    foreach ($e in @("SDKROOT", "OSX_SDK", "OSXCROSS_SDK")) {
-        $v = [Environment]::GetEnvironmentVariable($e)
-        if ($v) { $cands += $v }
-    }
-    $cands += @(
-        "C:\osxcross\SDK",
-        "C:\JumpWorld\tools\osxcross\SDK",
-        "C:\JumpWorld\osxcross\SDK"
-    )
-    foreach ($root in $cands) {
-        if (-not $root -or -not (Test-Path -LiteralPath $root)) { continue }
-        $use = $root
-        $item = Get-Item -LiteralPath $root
-        if ($item.PSIsContainer) {
-            $sdk = Get-ChildItem -LiteralPath $root -Directory -Filter "MacOSX*.sdk" -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($sdk) { $use = $sdk.FullName }
-        }
-        $lib = Join-Path $use "usr\lib"
-        if ((Test-Path -LiteralPath (Join-Path $lib "libSystem.tbd")) -or (Test-Path -LiteralPath (Join-Path $lib "libSystem.dylib"))) {
-            return $use
+            Copy-Item -LiteralPath $exeFrom -Destination (Join-Path $pf "cubecheck.exe") -Force
+        } catch {
+            Warn "не удалось скопировать cubecheck.exe в Program Files\CubeCheck: $($_.Exception.Message)"
         }
     }
-    return $null
+    $pfAssets = Join-Path $pf "assets"
+    $srcAssets = Join-Path $src "assets"
+    if (Test-Path -LiteralPath $srcAssets) {
+        try {
+            New-Item -ItemType Directory -Force -Path $pfAssets | Out-Null
+            Copy-Item -Path (Join-Path $srcAssets "*") -Destination $pfAssets -Force
+        } catch {
+            Warn "не удалось обновить assets в Program Files\CubeCheck: $($_.Exception.Message)"
+        }
+    }
+    Remove-LegacyInstallRoot $pf
+    try {
+        Write-UninstallHelpers $pf
+    } catch {
+        Warn "не удалось записать UnInstall.url в Program Files\CubeCheck: $($_.Exception.Message)"
+    }
+}
+
+function Test-NativeAotDll([string]$Path) {
+    if (-not (Test-Path $Path)) { throw "нет $Path после publish" }
+    $len = (Get-Item $Path).Length
+    if ($len -lt 400000) {
+        throw "cubecheck_api.dll слишком маленький ($len байт) — это не NativeAOT"
+    }
+    $fs = [System.IO.File]::OpenRead($Path)
+    try {
+        $mz = New-Object byte[] 2
+        [void]$fs.Read($mz, 0, 2)
+        if ($mz[0] -ne 0x4D -or $mz[1] -ne 0x5A) { throw "cubecheck_api.dll не PE" }
+    } finally { $fs.Close() }
+}
+
+function Publish-Api([string]$Rid, [string]$OutDir) {
+    Info ".NET NativeAOT cubecheck_api.dll ($Rid)"
+    $arch = if ($Rid -eq "win-x86") { "x86" } else { "x64" }
+    $cl = Use-MsvcEnv $arch
+    $linkDir = Split-Path $cl
+    if (-not (Test-Path (Join-Path $linkDir "link.exe"))) {
+        throw "link.exe нет рядом с cl.exe: $linkDir"
+    }
+    $whereLink = Get-Command link.exe -ErrorAction SilentlyContinue
+    if (-not $whereLink) { throw "link.exe не в PATH после Use-MsvcEnv" }
+    Info "MSVC linker: $($whereLink.Source)"
+    New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+    dotnet publish (Join-Path $dotnet "CubeCheck.Api\CubeCheck.Api.csproj") `
+        -c $cfg -f net8.0 -r $Rid --self-contained true -o $OutDir `
+        /p:IlcUseEnvironmentalTools=true
+    if ($LASTEXITCODE -ne 0) { throw "publish CubeCheck.Api $Rid не удался" }
+    $apiDllOut = Join-Path $OutDir "cubecheck_api.dll"
+    Test-NativeAotDll $apiDllOut
+    # NativeAOT publish dumps satellites (.pdb/.xml/.exp/.lib, CubeCheck.Core.dll). Keep only the AOT dll.
+    Get-ChildItem -LiteralPath $OutDir -Force | Where-Object { $_.Name -ne "cubecheck_api.dll" } |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force }
+}
+
+function Build-RustWindows([string]$OutDir, [switch]$SkipLegacyRelease) {
+    Info "C++ + C# API + Rust UI (windows-x64)"
+    if (-not (Test-Path (Join-Path $outNative "x64\cubecheck_native.dll"))) {
+        Compile-Native "x64"
+    }
+    $apiOut = Join-Path $dist "api-win-x64"
+    Publish-Api "win-x64" $apiOut
+    $apiDll = Join-Path $apiOut "cubecheck_api.dll"
+    $nativeDll = Join-Path $outNative "x64\cubecheck_native.dll"
+    if (-not (Test-Path $apiDll)) { throw "нет cubecheck_api.dll после publish" }
+    if (-not (Test-Path $nativeDll)) { throw "нет cubecheck_native.dll" }
+
+    $rel = Join-Path $root "target\release"
+    $relAssets = Join-Path $rel "assets"
+    New-Item -ItemType Directory -Force -Path $relAssets | Out-Null
+    Copy-Item $apiDll (Join-Path $relAssets "cubecheck_api.dll") -Force
+    Copy-Item $nativeDll (Join-Path $relAssets "cubecheck_native.dll") -Force
+
+    $env:CUBECHECK_API_DLL = $apiDll
+    $env:CUBECHECK_NATIVE_DLL = $nativeDll
+
+    Push-Location $root
+    try {
+        cargo build -p cubecheck --release --bin cubecheck --features gui
+        if ($LASTEXITCODE -ne 0) { throw "Сборка cubecheck не удалась" }
+        if (-not $SkipLegacyRelease) {
+            $env:CUBECHECK_SETUP_PAYLOAD = Join-Path $rel "cubecheck.exe"
+            cargo build -p cubecheck --release --bin cubecheck-setup --no-default-features --features setup-embed
+            if ($LASTEXITCODE -ne 0) { throw "Сборка cubecheck-setup не удалась" }
+        }
+    } finally {
+        Pop-Location
+    }
+
+    if (Test-Path $OutDir) { Remove-Item $OutDir -Recurse -Force }
+    $outAssets = Join-Path $OutDir "assets"
+    New-Item -ItemType Directory -Force -Path $outAssets | Out-Null
+    Copy-Item (Join-Path $rel "cubecheck.exe") (Join-Path $OutDir "cubecheck.exe") -Force
+    Copy-Item $apiDll (Join-Path $outAssets "cubecheck_api.dll") -Force
+    Copy-Item $nativeDll (Join-Path $outAssets "cubecheck_native.dll") -Force
+    foreach ($name in @("tools.json", "cubecheck.ico", "settings.default.json", "Everything.ini", "UnInstall.ico", "UnInstall.cmd")) {
+        $from = Join-Path $root "assets\$name"
+        if (Test-Path $from) {
+            Copy-Item $from (Join-Path $outAssets $name) -Force
+        }
+    }
+    Set-Content -Path (Join-Path $OutDir ".portable") -Value ""
+    Sanitize-WindowsPayload $OutDir
+    Write-UninstallHelpers $OutDir
+
+    Copy-Item (Join-Path $OutDir "cubecheck.exe") (Join-Path $root "cubecheck.exe") -Force
+    $rootAssets = Join-Path $root "assets"
+    New-Item -ItemType Directory -Force -Path $rootAssets | Out-Null
+    Copy-Item $apiDll (Join-Path $rootAssets "cubecheck_api.dll") -Force
+    Copy-Item $nativeDll (Join-Path $rootAssets "cubecheck_native.dll") -Force
+    Remove-LegacyInstallRoot $root
+    Remove-LegacyInstallRoot $rel
+    if (-not $SkipLegacyRelease) {
+        $setup = Join-Path $rel "cubecheck-setup.exe"
+        if (Test-Path $setup) {
+            Copy-Item $setup (Join-Path $dist "CubeCheck-Setup.exe") -Force
+            Copy-Item $setup (Join-Path $buildOut "CubeCheck-$Version-windows-x64-setup.exe") -Force
+            Copy-Item $setup (Join-Path $root "CubeCheck-Setup.exe") -Force
+        }
+    }
+    Copy-IfProgramFiles
+}
+
+function New-ShBundle([string]$Name, [hashtable]$Payloads, [string]$OutDir) {
+    if (Test-Path $OutDir) { Remove-Item $OutDir -Recurse -Force }
+    $payloadRoot = Join-Path $OutDir "payload"
+    New-Item -ItemType Directory -Force -Path $payloadRoot | Out-Null
+    Copy-Item (Join-Path $root "scripts\cubecheck.sh") (Join-Path $OutDir "cubecheck.sh") -Force
+    $have = 0
+    foreach ($key in $Payloads.Keys) {
+        $src = $Payloads[$key]
+        if (-not (Test-UnixRustPayload $src)) {
+            Warn "${Name}: пропускаю ${key} (нужен Rust ELF cubecheck без .dll, не Avalonia)"
+            continue
+        }
+        Copy-Tree $src (Join-Path $payloadRoot $key)
+        $have++
+    }
+    if ($have -lt 1) { throw "${Name}: нет payload" }
+}
+
+function New-WinUniversal([string]$OutDir, [string]$X64, [string]$X86) {
+    if (Test-Path $OutDir) { Remove-Item $OutDir -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path (Join-Path $OutDir "payload") | Out-Null
+    Copy-Item (Join-Path $outNative "cubecheck-launcher.exe") (Join-Path $OutDir "cubecheck-launcher.exe") -Force
+    Copy-Item (Join-Path $OutDir "cubecheck-launcher.exe") (Join-Path $OutDir "cubecheck.exe") -Force
+    Copy-Tree $X64 (Join-Path $OutDir "payload\windows-x64")
+    if (Test-Path (Join-Path $X86 "cubecheck.exe")) {
+        Copy-Tree $X86 (Join-Path $OutDir "payload\windows-x86")
+    }
+}
+
+function Copy-Vendor([string]$DestAssets) {
+    $src = Join-Path $root "assets"
+    $list = Join-Path $root "scripts\vendor-files.txt"
+    if (-not (Test-Path $list)) { return $false }
+    $ok = $true
+    New-Item -ItemType Directory -Force -Path $DestAssets | Out-Null
+    Get-Content $list | ForEach-Object {
+        $rel = $_.Trim()
+        if (-not $rel -or $rel.StartsWith("#")) { return }
+        $from = Join-Path $src $rel
+        $to = Join-Path $DestAssets $rel
+        if (Test-Path $from) {
+            New-Item -ItemType Directory -Force -Path (Split-Path $to) | Out-Null
+            Copy-Item $from $to -Force
+        } else {
+            Warn "нет vendor $rel"
+            $ok = $false
+        }
+    }
+    return $ok
+}
+
+function Stage-Release($Name, $PathOrDir) {
+    $dest = Join-Path $buildOut $Name
+    if (Test-Path $PathOrDir -PathType Container) {
+        Zip-Dir $PathOrDir $dest
+    } else {
+        Copy-Item $PathOrDir $dest -Force
+    }
+}
+
+function Test-FileMagic([string]$Path, [byte[]]$Magic) {
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    $fs = [System.IO.File]::OpenRead($Path)
+    try {
+        $buf = New-Object byte[] $Magic.Length
+        $n = $fs.Read($buf, 0, $Magic.Length)
+        if ($n -lt $Magic.Length) { return $false }
+        for ($i = 0; $i -lt $Magic.Length; $i++) {
+            if ($buf[$i] -ne $Magic[$i]) { return $false }
+        }
+        return $true
+    } finally { $fs.Close() }
+}
+
+function Test-Elf([string]$Path) {
+    Test-FileMagic $Path ([byte[]](0x7F, 0x45, 0x4C, 0x46))
+}
+
+function Get-DllFiles([string]$Dir) {
+    if (-not (Test-Path -LiteralPath $Dir)) { return @() }
+    @(Get-ChildItem -LiteralPath $Dir -Recurse -File -Filter "*.dll" -ErrorAction SilentlyContinue)
+}
+
+function Test-UnixRustPayload([string]$Src) {
+    $bin = Join-Path $Src "cubecheck"
+    if (-not (Test-Elf $bin)) { return $false }
+    if ((Get-DllFiles $Src).Count -gt 0) { return $false }
+    return $true
+}
+
+function Assert-LinuxPayload([string]$Dir) {
+    $dlls = Get-DllFiles $Dir
+    if ($dlls.Count -gt 0) {
+        throw "linux-x64 не должен содержать .dll: $(($dlls | Select-Object -First 8).Name -join ', ')"
+    }
+    $exes = @(Get-ChildItem -LiteralPath $Dir -Recurse -File -Filter "*.exe" -ErrorAction SilentlyContinue)
+    if ($exes.Count -gt 0) {
+        throw "linux-x64 не должен содержать Windows .exe: $($exes.Name -join ', ')"
+    }
+    $bin = Join-Path $Dir "cubecheck"
+    if (-not (Test-Elf $bin)) { throw "linux-x64: cubecheck не ELF ($bin)" }
+}
+
+function Write-UnixText([string]$Path, [string]$Text) {
+    $unix = $Text -replace "`r`n", "`n" -replace "`r", "`n"
+    if (-not $unix.EndsWith("`n")) { $unix += "`n" }
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($Path, $unix, $utf8)
+}
+
+function Write-Sha256Sums([string]$Root) {
+    $sums = Join-Path $Root "SHA256SUMS"
+    $lines = New-Object System.Collections.Generic.List[string]
+    Get-ChildItem -LiteralPath $Root -Recurse -File | Where-Object { $_.Name -ne "SHA256SUMS" } | ForEach-Object {
+        $rel = $_.FullName.Substring($Root.Length).TrimStart('\', '/').Replace('\', '/')
+        $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        $lines.Add("$hash  $rel")
+    }
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllLines($sums, $lines, $utf8)
+}
+
+function Copy-OnlineOsTree([string]$Src, [string]$Dst) {
+    if (-not (Test-Path -LiteralPath $Src)) { return $false }
+    Copy-Tree $Src $Dst
+    Get-ChildItem -LiteralPath $Dst -Recurse -Force -File -ErrorAction SilentlyContinue | ForEach-Object {
+        $name = $_.Name
+        if ($name -match '^(Everything\.exe|Shellbag\.exe|Procmon.*\.exe|Autoruns.*\.exe|procexp.*\.exe)$' -or
+            $_.FullName -match '\\SystemInformer\\' -or
+            $_.Extension -match '\.(pdb|xml|exp|lib|obj|ilk)$') {
+            Remove-Item -LiteralPath $_.FullName -Force
+        }
+    }
+    Get-ChildItem -LiteralPath $Dst -Recurse -Directory -Force -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -eq "SystemInformer" -or $_.Name -eq "extras" } |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force }
+    return $true
+}
+
+function Stage-GithubPayload {
+    $upload = Join-Path $dist "github-upload"
+    Info "GitHub payload (online, без vendor) -> $upload"
+    if (Test-Path -LiteralPath $upload) { Remove-Item -LiteralPath $upload -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $upload | Out-Null
+
+    $lic = Join-Path $root "LICENSE.md"
+    if (-not (Test-Path -LiteralPath $lic)) { throw "нет LICENSE.md" }
+    Copy-Item -LiteralPath $lic -Destination (Join-Path $upload "LICENSE.md") -Force
+
+    $payloadReadme = Join-Path $PSScriptRoot "payload-README.md"
+    if (Test-Path -LiteralPath $payloadReadme) {
+        Copy-Item -LiteralPath $payloadReadme -Destination (Join-Path $upload "README.md") -Force
+    }
+
+    foreach ($sh in @("install-linux.sh", "install-macos.sh")) {
+        $from = Join-Path $root "scripts\$sh"
+        if (Test-Path -LiteralPath $from) {
+            Copy-Item -LiteralPath $from -Destination (Join-Path $upload $sh) -Force
+        }
+    }
+
+    $win = Join-Path $dist "windows-x64"
+    if (-not (Test-Path -LiteralPath (Join-Path $win "cubecheck.exe"))) {
+        $uni = Join-Path $dist "universal-windows\payload\windows-x64"
+        if (Test-Path -LiteralPath (Join-Path $uni "cubecheck.exe")) { $win = $uni }
+    }
+    if (Test-Path -LiteralPath (Join-Path $win "cubecheck.exe")) {
+        [void](Copy-OnlineOsTree $win (Join-Path $upload "windows-x64"))
+        Sanitize-WindowsPayload (Join-Path $upload "windows-x64")
+        Write-UninstallHelpers (Join-Path $upload "windows-x64")
+    } else {
+        Warn "github-upload: нет windows-x64 cubecheck.exe — соберите windows-x64"
+    }
+
+    foreach ($key in @("linux-x64", "linux-x86")) {
+        $src = Join-Path $dist $key
+        if (Test-UnixRustPayload $src) {
+            [void](Copy-OnlineOsTree $src (Join-Path $upload $key))
+        }
+    }
+
+    foreach ($key in @("osx-x64", "osx-arm64")) {
+        $src = Join-Path $dist $key
+        if (-not (Test-Path -LiteralPath (Join-Path $src "cubecheck"))) {
+            $src = Join-Path $dist "universal-macos\payload\$key"
+        }
+        if (Get-Command Test-MacPayload -ErrorAction SilentlyContinue) {
+            if (Test-MacPayload $src) {
+                [void](Copy-OnlineOsTree $src (Join-Path $upload $key))
+            }
+        } elseif ((Test-Path -LiteralPath (Join-Path $src "cubecheck")) -and ((Get-DllFiles $src).Count -eq 0)) {
+            [void](Copy-OnlineOsTree $src (Join-Path $upload $key))
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath (Join-Path $upload "windows-x64\cubecheck.exe")) -and
+        -not (Test-Path -LiteralPath (Join-Path $upload "linux-x64\cubecheck"))) {
+        throw "github-upload пуст: нет windows-x64 и linux-x64 payload"
+    }
+
+    Write-Sha256Sums $upload
+    $zip = Join-Path $buildOut "CubeCheck-$Version-github-payload.zip"
+    Zip-Dir $upload $zip
+    $buildUpload = Join-Path $buildOut "github-upload"
+    Copy-Tree $upload $buildUpload
+    Info "payload zip: $zip ($((Get-Item $zip).Length) байт)"
+    return $zip
+}
+
+function Publish-WizardInstaller {
+    param(
+        [string]$OutExe = $(Join-Path $buildOut "CubeCheck-$Version-universal-windows-setup.exe"),
+        [string]$OfflinePayloadZip = ""
+    )
+    $offline = -not [string]::IsNullOrWhiteSpace($OfflinePayloadZip)
+    if ($offline) {
+        Info "WPF мастер CubeCheck.Installer (офлайн, встроенный zip)"
+        if (-not (Test-Path -LiteralPath $OfflinePayloadZip)) {
+            throw "нет офлайн payload zip: $OfflinePayloadZip"
+        }
+        $zipLen = (Get-Item -LiteralPath $OfflinePayloadZip).Length
+        if ($zipLen -lt 1000000) { throw "офлайн payload zip слишком маленький ($zipLen байт)" }
+    } else {
+        Info "WPF FDD мастер CubeCheck.Installer (онлайн, без payload внутри exe)"
+    }
+
+    $pub = if ($offline) { Join-Path $dist "installer-win-x64-offline" } else { Join-Path $dist "installer-win-x64" }
+    if (Test-Path -LiteralPath $pub) { Remove-Item -LiteralPath $pub -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $pub | Out-Null
+    $proj = Join-Path $dotnet "CubeCheck.Installer\CubeCheck.Installer.csproj"
+    $msbuildArgs = @(
+        $proj, "-c", $cfg, "-f", "net8.0-windows", "-r", "win-x64",
+        "--self-contained", "false", "-o", $pub,
+        "/p:PublishSingleFile=true",
+        "/p:IncludeNativeLibrariesForSelfExtract=false",
+        "/p:IncludeAllContentForSelfExtract=false"
+    )
+    if ($offline) {
+        $msbuildArgs += "/p:OfflinePayloadZip=$OfflinePayloadZip"
+        $msbuildArgs += "/p:DefineConstants=CUBECHECK_OFFLINE_SETUP"
+    }
+    dotnet publish @msbuildArgs
+    if ($LASTEXITCODE -ne 0) { throw "publish CubeCheck.Installer не удался" }
+
+    $built = Join-Path $pub "CubeCheck-Setup.exe"
+    if (-not (Test-Path -LiteralPath $built)) { throw "нет CubeCheck-Setup.exe после publish" }
+    New-Item -ItemType Directory -Force -Path (Split-Path $OutExe) | Out-Null
+    Copy-Item -LiteralPath $built -Destination $OutExe -Force
+    Get-ChildItem -LiteralPath $pub -Filter "*.zip" -ErrorAction SilentlyContinue | ForEach-Object {
+        throw "publish положил zip в установщик: $($_.FullName)"
+    }
+    $len = (Get-Item $OutExe).Length
+    if ($len -lt 20000) { throw "setup.exe слишком маленький ($len байт)" }
+    if (-not $offline -and $len -gt 15MB) {
+        throw "онлайн setup.exe слишком большой ($len байт) — payload не должен быть внутри"
+    }
+    if ($offline -and $len -lt 1MB) {
+        throw "офлайн setup.exe слишком маленький ($len байт) — нет встроенного пакета"
+    }
+    if (-not (Test-FileMagic $OutExe ([byte[]](0x4D, 0x5A)))) {
+        throw "setup.exe не PE: $OutExe"
+    }
+    Info "wizard: $OutExe ($len байт)"
+    return $OutExe
+}
+
+function Write-LinuxLauncher([string]$Path) {
+    Write-UnixText $Path @'
+#!/bin/sh
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+chmod +x "$ROOT/cubecheck" "$ROOT/assets/bin/"* 2>/dev/null || true
+export CUBECHECK_PORTABLE=1
+export APPIMAGE_EXTRACT_AND_RUN=1
+if [ -f "$ROOT/.offline" ] || [ -f "$ROOT/assets/.offline" ]; then
+  export CUBECHECK_OFFLINE=1
+fi
+export PATH="$ROOT/assets/bin:$PATH"
+cd "$ROOT"
+exec "$ROOT/cubecheck" "$@"
+'@
+}
+
+function Use-AsciiTemp {
+    $ascii = "C:\JumpWorld\tmp-ascii"
+    New-Item -ItemType Directory -Force -Path $ascii | Out-Null
+    $env:TEMP = $ascii
+    $env:TMP = $ascii
+    $env:ZIG_GLOBAL_CACHE_DIR = Join-Path $ascii "zig-cache"
+    $env:ZIG_LOCAL_CACHE_DIR = Join-Path $ascii "zig-local"
+}
+
+function Ensure-RustupTarget([string]$Triple) {
+    $installed = @(rustup target list --installed)
+    if ($installed -notcontains $Triple) {
+        Info "rustup target add $Triple"
+        rustup target add $Triple
+        if ($LASTEXITCODE -ne 0) { throw "не удалось установить rustup target $Triple" }
+    }
 }
 
 function Ensure-ZigFilter {
-    $wrapDir = Join-Path $Root ".zig-wrappers"
-    if (-not (Test-Path $wrapDir)) { New-Item -ItemType Directory -Path $wrapDir | Out-Null }
-    $src = Join-Path $Root "scripts\zig-cc-filter.rs"
+    $wrapDir = Join-Path $root ".zig-wrappers"
+    New-Item -ItemType Directory -Force -Path $wrapDir | Out-Null
+    $src = Join-Path $root "scripts\zig-cc-filter.rs"
     $exe = Join-Path $wrapDir "zig-cc-filter.exe"
-    $need = -not (Test-Path -LiteralPath $exe)
-    if (-not $need) {
-        $need = (Get-Item -LiteralPath $src).LastWriteTimeUtc -gt (Get-Item -LiteralPath $exe).LastWriteTimeUtc
+    if (-not (Test-Path -LiteralPath $src)) { throw "нет scripts/zig-cc-filter.rs" }
+    $need = $true
+    if (Test-Path -LiteralPath $exe) {
+        if ((Get-Item $exe).LastWriteTime -ge (Get-Item $src).LastWriteTime) { $need = $false }
     }
     if ($need) {
-        Write-Info "rustc -O zig-cc-filter.rs"
-        & rustc -O -o $exe $src
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $exe)) {
-            throw "failed to build .zig-wrappers/zig-cc-filter.exe (host rustc)"
-        }
+        Info "rustc zig-cc-filter"
+        rustc -O -o $exe $src
+        if ($LASTEXITCODE -ne 0) { throw "zig-cc-filter не собрался" }
     }
     return $exe
 }
 
-function New-ZigWrappers([string]$triple) {
-    $zig = Get-ZigExe
-    $zt = Get-ZigCcTarget $triple
-    if (-not $zig -or -not $zt) { return $null }
-    $filter = Ensure-ZigFilter
-    $wrapDir = Join-Path $Root ".zig-wrappers"
-    if (-not (Test-Path $wrapDir)) { New-Item -ItemType Directory -Path $wrapDir | Out-Null }
-    $tag = $triple -replace '[^a-z0-9]', '_'
-    $sdk = $null
-    if ($triple -like "*apple*") {
-        $sdk = Find-AppleSdk
-    }
-    $cc = Join-Path $wrapDir "zig-cc-$tag.cmd"
-    $ar = Join-Path $wrapDir "zig-ar-$tag.cmd"
-    $ccLine = "@echo off`r`n`"$filter`" `"$zig`" cc $zt %*"
-    if ($sdk) {
-        $ccLine = "@echo off`r`n`"$filter`" `"$zig`" cc $zt -isysroot `"$sdk`" %*"
-    }
-    Set-Content -LiteralPath $cc -Value $ccLine -Encoding ascii
-    Set-Content -LiteralPath $ar -Value "@echo off`r`n`"$filter`" `"$zig`" ar %*" -Encoding ascii
-    return [pscustomobject]@{ Cc = $cc; Ar = $ar; Zig = $zig; ZigTarget = $zt; Sdk = $sdk }
-}
-
-function Set-CrossCcEnv([string]$triple, $wraps) {
-    $lower = $triple -replace '-', '_'
-    $upper = $lower.ToUpperInvariant()
-    Set-Item -Path "Env:CC_$lower" -Value $wraps.Cc
-    Set-Item -Path "Env:CXX_$lower" -Value $wraps.Cc
-    Set-Item -Path "Env:AR_$lower" -Value $wraps.Ar
-    Set-Item -Path "Env:CC_$upper" -Value $wraps.Cc
-    Set-Item -Path "Env:CXX_$upper" -Value $wraps.Cc
-    Set-Item -Path "Env:AR_$upper" -Value $wraps.Ar
-    Set-Item -Path "Env:CARGO_TARGET_${upper}_LINKER" -Value $wraps.Cc
-}
-
-function Invoke-CargoLogged([string[]]$Cmd, [string]$LogPath) {
-    Write-Info ($Cmd -join " ")
-    $dir = Split-Path -Parent $LogPath
-    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
-    $prevEa = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    $sw = New-Object IO.StreamWriter $LogPath, $false, ([Text.Encoding]::UTF8)
-    try {
-        & $Cmd[0] @($Cmd | Select-Object -Skip 1) 2>&1 | ForEach-Object {
-            $line = if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.ToString() } else { "$_" }
-            Write-Host $line
-            $sw.WriteLine($line)
-        }
-        return $LASTEXITCODE
-    } finally {
-        $sw.Dispose()
-        $ErrorActionPreference = $prevEa
-    }
-}
-
-function Build-UnixGui {
-    param(
-        [string]$Triple,
-        [string]$DistName
+function Resolve-ZigAscii {
+    $preferred = @(
+        "C:\JumpWorld\tools\zig-copy\zig.exe",
+        "C:\JumpWorld\tools\zig\zig.exe"
     )
-    try { Ensure-RustupTarget $Triple } catch {
-        throw "Cannot install target $Triple : $($_.Exception.Message)"
+    foreach ($p in $preferred) {
+        if (Test-Path -LiteralPath $p) { return $p }
     }
+    $zigCmd = Get-Command zig -ErrorAction SilentlyContinue
+    if (-not $zigCmd) { throw "zig не найден (нужен для кросс-сборки Linux ELF с Windows)" }
+    $link = Get-Item -LiteralPath $zigCmd.Source
+    $real = if ($link.Target) { [string]$link.Target } else { $link.FullName }
+    $realDir = Split-Path $real
+    $asciiDir = "C:\JumpWorld\tools\zig-copy"
+    $asciiExe = Join-Path $asciiDir "zig.exe"
+    New-Item -ItemType Directory -Force -Path (Split-Path $asciiDir) | Out-Null
+    if (-not (Test-Path -LiteralPath $asciiExe)) {
+        Info "копирую zig на ASCII-путь $asciiDir (WinGet лежит в профиле с кириллицей)"
+        New-Item -ItemType Directory -Force -Path $asciiDir | Out-Null
+        Copy-Item -LiteralPath (Join-Path $realDir "*") -Destination $asciiDir -Recurse -Force
+    }
+    if (-not (Test-Path -LiteralPath $asciiExe)) { throw "не удалось подготовить zig на ASCII-пути" }
+    return $asciiExe
+}
 
-    $outDir = Join-Path $Dist $DistName
-    if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir | Out-Null }
-    $logPath = Join-Path $outDir "compile.log"
-    $errors = @()
+function Set-ZigLinuxEnv {
+    $zig = Resolve-ZigAscii
+    Info "zig: $zig"
+    $filter = Ensure-ZigFilter
+    $wrapDir = Join-Path $root ".zig-wrappers"
+    $cc = Join-Path $wrapDir "zig-cc-x86_64-unknown-linux-gnu.cmd"
+    $ar = Join-Path $wrapDir "zig-ar-x86_64-unknown-linux-gnu.cmd"
+    Set-Content -LiteralPath $cc -Value "@echo off`r`n`"$filter`" `"$zig`" cc x86_64-linux-gnu.2.17 %*" -Encoding ascii
+    Set-Content -LiteralPath $ar -Value "@echo off`r`n`"$filter`" `"$zig`" ar %*" -Encoding ascii
+    $env:CC_x86_64_unknown_linux_gnu = $cc
+    $env:CXX_x86_64_unknown_linux_gnu = $cc
+    $env:AR_x86_64_unknown_linux_gnu = $ar
+    $env:CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER = $cc
+    $env:CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_AR = $ar
     $env:PKG_CONFIG_ALLOW_CROSS = "1"
+    $pkg = Join-Path $wrapDir "empty-pkgconfig"
+    New-Item -ItemType Directory -Force -Path $pkg | Out-Null
+    $env:PKG_CONFIG_LIBDIR = $pkg
+}
 
-    $cargoArgs = @("build", "--release", "-p", "cubecheck", "--bin", "cubecheck", "--target", $Triple)
+function Remove-DllDump([string]$Dir, [string]$Why) {
+    if (-not (Test-Path -LiteralPath $Dir)) { return }
+    if ((Get-DllFiles $Dir).Count -gt 0) {
+        Warn "$Why — удаляю $Dir"
+        Remove-Item -LiteralPath $Dir -Recurse -Force
+    }
+}
+
+function Clear-BuildAvaloniaJunk {
+    Get-ChildItem -LiteralPath $buildOut -File -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -like "Avalonia*" -or
+        $_.Name -like "System.*" -or
+        $_.Name -eq "cubecheck.dll" -or
+        $_.Name -eq "CubeCheck.Core.dll" -or
+        $_.Name -like "Microsoft.*" -or
+        $_.Name -eq "HarfBuzzSharp.dll" -or
+        $_.Name -eq "SkiaSharp.dll" -or
+        $_.Name -eq "WindowsBase.dll" -or
+        $_.Name -eq "netstandard.dll" -or
+        $_.Name -eq "mscorlib.dll"
+    } | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force }
+}
+
+function Try-PublishLinuxApi {
+    Info "Пробую NativeAOT libcubecheck_api.so (linux-x64) с этой Windows-машины"
+    $out = Join-Path $dist "api-linux-x64"
+    New-Item -ItemType Directory -Force -Path $out | Out-Null
     $ok = $false
-
-    $wraps = New-ZigWrappers $Triple
-    if ($wraps) {
-        Set-CrossCcEnv $Triple $wraps
-        Write-Info "zig cc $($wraps.ZigTarget) via $($wraps.Zig)"
-        $st = Invoke-CargoLogged -Cmd (@("cargo") + $cargoArgs) -LogPath $logPath
-        if ($st -eq 0) { $ok = $true }
-        else { $errors += "zig cc ($($wraps.ZigTarget)): cargo exit $st" }
-    }
-
-    if (-not $ok -and -not $wraps -and (Get-Command cargo-zigbuild -ErrorAction SilentlyContinue)) {
-        $st = Invoke-CargoLogged -Cmd @("cargo", "zigbuild", "--release", "-p", "cubecheck", "--bin", "cubecheck", "--target", $Triple) -LogPath $logPath
-        if ($st -eq 0) { $ok = $true }
-        else { $errors += "cargo zigbuild: exit $st" }
-    }
-
-    if (-not $ok -and (Get-Command cross -ErrorAction SilentlyContinue)) {
-        $st = Invoke-CargoLogged -Cmd @("cross", "build", "--release", "-p", "cubecheck", "--bin", "cubecheck", "--target", $Triple) -LogPath $logPath
-        if ($st -eq 0) { $ok = $true }
-        else { $errors += "cross: exit $st" }
-    }
-
-    if (-not $ok -and -not $wraps) {
-        $st = Invoke-CargoLogged -Cmd (@("cargo") + $cargoArgs) -LogPath $logPath
-        if ($st -eq 0) { $ok = $true }
-        else { $errors += "cargo: exit $st" }
-    }
-
-    $src = Join-Path $Root "target\$Triple\release\cubecheck"
-    $isDarwin = $Triple -like "*apple*"
-    $good = $false
-    if ($ok -and (Test-Path -LiteralPath $src)) {
-        $good = if ($isDarwin) { Test-MachO $src } else { Test-Elf $src }
-    }
-
-    if (-not $good) {
-        $tail = ""
-        if (Test-Path -LiteralPath $logPath) {
-            $lines = Get-Content -LiteralPath $logPath -ErrorAction SilentlyContinue
-            if ($lines) { $tail = ($lines | Select-Object -Last 40) -join "`n" }
-        }
-        $sdkHint = ""
-        if ($isDarwin) {
-            $sdk = Find-AppleSdk
-            if ($sdk) {
-                $sdkHint = "Apple SDK found at $sdk but the link still failed."
-            } else {
-                $sdkHint = @"
-No Apple SDK/sysroot on this machine (SDKROOT / osxcross not set).
-A real Mach-O GUI needs Apple's libSystem + AppKit/CoreFoundation — do not download Xcode SDKs from random mirrors.
-On a Mac:
-  rustup target add aarch64-apple-darwin x86_64-apple-darwin
-  cargo build --release --bin cubecheck --target aarch64-apple-darwin
-  cargo build --release --bin cubecheck --target x86_64-apple-darwin
-  ./build.sh macos-universal
-"@
-            }
-        } else {
-            $sdkHint = @"
-Linux ELF was not produced. Need zig cc (zstd-sys / ring) or a GNU toolchain.
-TLS is rustls (no OpenSSL). Install zig + rustup target, then: build.bat $DistName
-"@
-        }
-        throw @"
-Failed to compile $Triple ($DistName).
-
-$($errors -join "`n")
-
-$sdkHint
-
-Last compiler lines:
-$tail
-"@
-    }
-
-    $destName = "cubecheck-$DistName"
-    Copy-FileForce $src (Join-Path $outDir $destName)
-    Copy-CoreAssets (Join-Path $outDir "assets")
-    return (Join-Path $outDir $destName)
-}
-
-function Write-DebTree($archDeb, $outDir, $linuxBin) {
-    $pkg = Join-Path $outDir "pkg"
-    if (Test-Path $pkg) { Remove-Item -Recurse -Force $pkg }
-    New-Item -ItemType Directory -Path (Join-Path $pkg "DEBIAN") | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $pkg "usr\bin") | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $pkg "usr\share\cubecheck\assets") | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $pkg "usr\share\doc\cubecheck") | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $pkg "usr\share\applications") | Out-Null
-
-    $control = Get-Content (Join-Path $Root "scripts\debian\control.in") -Raw
-    $control = $control.Replace("@VERSION@", $Version).Replace("@ARCH@", $archDeb)
-    Set-Content -LiteralPath (Join-Path $pkg "DEBIAN\control") -Value $control -Encoding ascii
-    Copy-FileForce (Join-Path $Root "scripts\debian\copyright") (Join-Path $pkg "usr\share\doc\cubecheck\copyright")
-    Copy-FileForce (Join-Path $Root "LICENSE.md") (Join-Path $pkg "usr\share\doc\cubecheck\LICENSE.md")
-    Copy-CoreAssets (Join-Path $pkg "usr\share\cubecheck\assets")
-    $desktop = @"
-[Desktop Entry]
-Type=Application
-Name=CubeCheck
-Comment=Minecraft cheat-name checker
-Exec=cubecheck
-Terminal=false
-Categories=Utility;
-"@
-    Set-Content -LiteralPath (Join-Path $pkg "usr\share\applications\cubecheck.desktop") -Value $desktop -Encoding ascii
-
-    $readme = @"
-Debian package tree for CubeCheck $Version ($archDeb).
-
-On Linux:
-  chmod +x scripts/pack-deb.sh
-  scripts/pack-deb.sh `"$pkg`" `"$(Join-Path $outDir "cubecheck_${Version}_$archDeb.deb")`"
-
-If usr/bin/cubecheck is missing or not a real ELF, this host could not produce Linux:
-
-  rustup target add x86_64-unknown-linux-gnu i686-unknown-linux-gnu
-  build.bat linux-deb-x64
-  or: cargo zigbuild --release --bin cubecheck --target x86_64-unknown-linux-gnu
-
-TLS is rustls (no OpenSSL sysroot). GitHub Release Linux asset is the .sh launcher, not a dummy tarball.
-"@
-    Set-Content -LiteralPath (Join-Path $outDir "README.txt") -Value $readme -Encoding utf8
-    Copy-FileForce (Join-Path $Root "scripts\pack-deb.sh") (Join-Path $outDir "pack-deb.sh")
-
-    if ($linuxBin -and (Test-Elf $linuxBin)) {
-        Copy-FileForce $linuxBin (Join-Path $pkg "usr\bin\cubecheck")
-    }
-    return $pkg
-}
-
-function Try-PackDeb($pkg, $debPath) {
-    $bin = Join-Path $pkg "usr\bin\cubecheck"
-    if (-not (Test-Elf $bin)) { return $false }
-    $bash = Get-Command bash -ErrorAction SilentlyContinue
-    if ($bash) {
-        & bash (Join-Path $Root "scripts\pack-deb.sh") $pkg $debPath
-        return ($LASTEXITCODE -eq 0 -and (Test-Path $debPath))
-    }
-    if (Get-Command dpkg-deb -ErrorAction SilentlyContinue) {
-        & dpkg-deb --build $pkg $debPath
-        return ($LASTEXITCODE -eq 0)
-    }
-    return $false
-}
-
-function Get-BundleReadme($local) {
-    $extra = if ($local) {
-        @"
-
-universal-local is OFFLINE. The app will not download anything.
-Windows payloads include third-party binaries copied from assets/ at pack time.
-
-Those third-party files keep THEIR OWN licenses (voidtools Everything,
-Microsoft Sysinternals, System Informer, PrivaZer/Goversoft Shellbag).
-CubeCheck MIT does NOT cover them. Redistribute only if you have the right
-to do so; you may need to host/build this pack yourself.
-"@
-    } else {
-        @"
-
-This SKU may download Everything / Sysinternals / etc. from official HTTPS
-URLs the first time you use Components (Windows only).
-"@
-    }
-    return @"
-CubeCheck universal
-===================
-
-Run cubecheck.exe (Windows), cubecheck.sh (Linux), or cubecheck.command (macOS).
-The launcher detects OS/arch and starts payload/<id>/cubecheck.
-
-Supported when the matching payload exists:
-  Windows 7 / 10 / 11   payload/windows-x64 or windows-x86
-  Linux                 payload/linux-x64 or linux-x86
-  macOS                 payload/macos-universal
-
-If a payload is missing, the launcher exits with an error (not a silent crash).
-
-Portable: settings and reports stay next to the payload binary.
-$extra
-CubeCheck source: MIT (LICENSE.md).
-"@
-}
-
-function Stage-PayloadFromDist($bundlePayload, $id, $distName, $binFile) {
-    $dest = Join-Path $bundlePayload $id
-    $srcBin = Join-Path (Join-Path $Dist $distName) $binFile
-    $ok = $false
-    if ($id -like "linux-*") { $ok = Test-Elf $srcBin }
-    elseif ($id -like "macos-*") { $ok = Test-MachO $srcBin }
-    else { $ok = Test-Path $srcBin }
-    if ($ok) {
-        if (-not (Test-Path $dest)) { New-Item -ItemType Directory -Path $dest | Out-Null }
-        $leaf = if ($id -like "windows-*") { "cubecheck.exe" } else { "cubecheck" }
-        Copy-FileForce $srcBin (Join-Path $dest $leaf)
-        Copy-CoreAssets (Join-Path $dest "assets")
-        Write-Marker (Join-Path $dest ".portable") ""
-        return $true
-    }
-    Write-Placeholder $dest $id
-    return $false
-}
-
-function Pack-Universal($local) {
-    $name = if ($local) { "universal-local" } else { "universal" }
-    $folderName = if ($local) { "CubeCheck-universal-local" } else { "CubeCheck-universal" }
-    $outRoot = Join-Path $Dist $name
-    $bundle = Join-Path $outRoot $folderName
-    if (Test-Path $bundle) { Remove-Item -Recurse -Force $bundle }
-    New-Item -ItemType Directory -Path $bundle | Out-Null
-    $payload = Join-Path $bundle "payload"
-    New-Item -ItemType Directory -Path $payload | Out-Null
-
-    $launcher = Build-LauncherWindows
-    Copy-FileForce $launcher (Join-Path $bundle "cubecheck.exe")
-    Copy-FileForce (Join-Path $Root "scripts\posix-launcher.sh") (Join-Path $bundle "cubecheck.sh")
-    Copy-FileForce (Join-Path $Root "scripts\cubecheck.command") (Join-Path $bundle "cubecheck.command")
-    Copy-FileForce (Join-Path $Root "LICENSE.md") (Join-Path $bundle "LICENSE.md")
-    Set-Content -LiteralPath (Join-Path $bundle "README.txt") -Value (Get-BundleReadme $local) -Encoding utf8
-
-    if ($local) {
-        Write-Marker (Join-Path $bundle ".offline") "CUBECHECK_OFFLINE=1`n"
-    }
-
-    $wx64 = if ($local) {
-        Stage-WindowsGui -Triple "x86_64-pc-windows-msvc" -DistName "universal-local-build\windows-x64" -OutExeName "cubecheck-windows-x64.exe" -TargetDir "target-offline" -Offline
-        Join-Path $Dist "universal-local-build\windows-x64\cubecheck-windows-x64.exe"
-    } else {
-        Join-Path $Dist "windows-x64\cubecheck-windows-x64.exe"
-    }
-    $wx86 = if ($local) {
-        try {
-            [void](Stage-WindowsGui -Triple "i686-pc-windows-msvc" -DistName "universal-local-build\windows-x86" -OutExeName "cubecheck-windows-x86.exe" -TargetDir "target-offline" -Offline)
-            Join-Path $Dist "universal-local-build\windows-x86\cubecheck-windows-x86.exe"
-        } catch {
-            Write-Warn $_.Exception.Message
-            $null
-        }
-    } else {
-        Join-Path $Dist "windows-x86\cubecheck-windows-x86.exe"
-    }
-
-    $have = 0
-    function Put-Win($id, $src) {
-        if ($src -and (Test-Path $src)) {
-            $dest = Join-Path $payload $id
-            New-Item -ItemType Directory -Path $dest -Force | Out-Null
-            Copy-FileForce $src (Join-Path $dest "cubecheck.exe")
-            Copy-CoreAssets (Join-Path $dest "assets")
-            Write-Marker (Join-Path $dest ".portable") ""
-            if ($local) {
-                Write-Marker (Join-Path $dest ".offline") ""
-                Copy-VendorAssets (Join-Path $dest "assets")
-            }
-            return 1
-        }
-        Write-Placeholder (Join-Path $payload $id) $id
-        return 0
-    }
-
-    $have += Put-Win "windows-x64" $wx64
-    $have += Put-Win "windows-x86" $wx86
-
-    foreach ($pair in @(
-        @{ id = "linux-x64"; dist = "linux-deb-x64"; bin = "cubecheck-linux-deb-x64" },
-        @{ id = "linux-x86"; dist = "linux-deb-x86"; bin = "cubecheck-linux-deb-x86" }
-    )) {
-        $ok = Stage-PayloadFromDist $payload $pair.id $pair.dist $pair.bin
-        if ($ok) { $have += 1 }
-        if ($ok -and $local) {
-            Write-Marker (Join-Path $payload "$($pair.id)\.offline") ""
-        }
-    }
-
-    $macBin = Join-Path $Dist "macos-universal\cubecheck-macos-universal"
-    $macDir = Join-Path $payload "macos-universal"
-    if (Test-MachO $macBin) {
-        New-Item -ItemType Directory -Path $macDir -Force | Out-Null
-        Copy-FileForce $macBin (Join-Path $macDir "cubecheck")
-        Copy-CoreAssets (Join-Path $macDir "assets")
-        Write-Marker (Join-Path $macDir ".portable") ""
-        if ($local) { Write-Marker (Join-Path $macDir ".offline") "" }
-        $have += 1
-    } else {
-        Write-Placeholder $macDir "macos-universal"
-    }
-
-    if ($have -lt 1) { throw "${name}: no payload binaries to pack" }
-
-    $zip = Join-Path $outRoot "$folderName.zip"
-    Compress-Dir $bundle $zip
-    return $bundle
-}
-
-function Pack-LinuxUniversal {
-    $outRoot = Join-Path $Dist "linux-universal"
-    $bundle = Join-Path $outRoot "CubeCheck-linux-universal"
-    if (Test-Path $bundle) { Remove-Item -Recurse -Force $bundle }
-    New-Item -ItemType Directory -Path $bundle | Out-Null
-    Copy-FileForce (Join-Path $Root "scripts\posix-launcher.sh") (Join-Path $bundle "cubecheck")
-    Copy-FileForce (Join-Path $Root "scripts\posix-launcher.sh") (Join-Path $bundle "cubecheck.sh")
-    Copy-FileForce (Join-Path $Root "LICENSE.md") (Join-Path $bundle "LICENSE.md")
-    Set-Content -LiteralPath (Join-Path $bundle "README.txt") -Value @"
-CubeCheck linux-universal (distro-agnostic).
-The GitHub Release asset is CubeCheck-$Version-linux-universal.sh
-(chmod +x and run it). This folder is a staging layout.
-"@ -Encoding utf8
-
-    $payload = Join-Path $bundle "payload"
-    $have = 0
-    if (Stage-PayloadFromDist $payload "linux-x64" "linux-deb-x64" "cubecheck-linux-deb-x64") { $have++ }
-    if (Stage-PayloadFromDist $payload "linux-x86" "linux-deb-x86" "cubecheck-linux-deb-x86") { $have++ }
-    $sh = Join-Path $outRoot (Get-ReleaseFileName "linux-universal.sh")
-    if (Test-Path $sh) { Remove-Item $sh -Force }
-    if ($have -lt 1) {
-        Write-SkipReadme $outRoot "linux-universal" @"
-No Linux cubecheck ELF was produced on this host.
-Do not ship a dummy .sh. Build linux-deb-x64 / linux-deb-x86 first
-(zig cc / cargo-zigbuild / a Linux machine), then rebuild this target.
-This layout stays in dist/; it is not copied to build/ (GitHub Releases).
-"@
-        throw "linux-universal: skipped — no Linux ELF on this host. Layout written to dist/linux-universal."
-    }
-
-    $stage = Join-Path $outRoot "sh-stage"
-    if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
-    New-Item -ItemType Directory -Path $stage | Out-Null
-    Copy-Tree $payload (Join-Path $stage "payload")
-    Copy-CoreAssets (Join-Path $stage "assets")
-    Copy-FileForce (Join-Path $Root "LICENSE.md") (Join-Path $stage "LICENSE.md")
-    [void](Pack-LinuxShFromStage $stage $sh "linux-universal")
-    return $bundle
-}
-
-function Invoke-One($name) {
     try {
-    switch ($name) {
-        "windows-x64" {
-            $p = Stage-WindowsGui -Triple "x86_64-pc-windows-msvc" -DistName "windows-x64" -OutExeName "cubecheck-windows-x64.exe" -WithSetup
-            Record-Result $name "OK" $p
+        dotnet publish (Join-Path $dotnet "CubeCheck.Api\CubeCheck.Api.csproj") `
+            -c $cfg -f net8.0 -r linux-x64 --self-contained true -o $out
+        $so = Join-Path $out "libcubecheck_api.so"
+        if ($LASTEXITCODE -eq 0 -and (Test-Elf $so)) {
+            Info "libcubecheck_api.so готов"
+            $ok = $true
+        } else {
+            Warn "NativeAOT linux-x64 не дал ELF .so (dotnet exit=$LASTEXITCODE). С этой Windows-машины кросс-publish Linux NativeAOT недоступен (нужен Linux clang/sysroot). Не кладу cubecheck_api.dll в Linux-пакет."
         }
-        "windows-x86" {
-            $p = Stage-WindowsGui -Triple "i686-pc-windows-msvc" -DistName "windows-x86" -OutExeName "cubecheck-windows-x86.exe" -WithSetup
-            Record-Result $name "OK" $p
-        }
-        "linux-deb-x64" {
-            $bin = $null
-            try { $bin = Build-UnixGui -Triple "x86_64-unknown-linux-gnu" -DistName "linux-deb-x64" } catch { Write-Warn $_.Exception.Message }
-            $pkg = Write-DebTree "amd64" (Join-Path $Dist "linux-deb-x64") $bin
-            $deb = Join-Path (Join-Path $Dist "linux-deb-x64") "cubecheck_${Version}_amd64.deb"
-            $packed = Try-PackDeb $pkg $deb
-            if (-not $bin -or -not (Test-Elf $bin)) {
-                Record-Result $name "FAIL" "Linux ELF not built; Debian tree at $pkg"
-                throw "linux-deb-x64: no Linux ELF on this host. Debian layout written to dist/linux-deb-x64/pkg. See compile.log. Pack on Linux with scripts/pack-deb.sh."
-            }
-            $sh = Pack-LinuxShSingle $bin (Join-Path $Dist "linux-deb-x64\$(Get-ReleaseFileName 'linux-x64.sh')") "linux-x64"
-            $detail = $sh
-            if ($packed) { $detail = "$sh ; $deb" }
-            Record-Result $name "OK" $detail
-        }
-        "linux-deb-x86" {
-            $bin = $null
-            try { $bin = Build-UnixGui -Triple "i686-unknown-linux-gnu" -DistName "linux-deb-x86" } catch { Write-Warn $_.Exception.Message }
-            $pkg = Write-DebTree "i386" (Join-Path $Dist "linux-deb-x86") $bin
-            $deb = Join-Path (Join-Path $Dist "linux-deb-x86") "cubecheck_${Version}_i386.deb"
-            $packed = Try-PackDeb $pkg $deb
-            if (-not $bin -or -not (Test-Elf $bin)) {
-                Record-Result $name "FAIL" "Linux i686 ELF not built; Debian tree at $pkg"
-                throw "linux-deb-x86: no Linux ELF on this host. Debian layout written to dist/linux-deb-x86/pkg. See compile.log."
-            }
-            $sh = Pack-LinuxShSingle $bin (Join-Path $Dist "linux-deb-x86\$(Get-ReleaseFileName 'linux-x86.sh')") "linux-x86"
-            $detail = $sh
-            if ($packed) { $detail = "$sh ; $deb" }
-            Record-Result $name "OK" $detail
-        }
-        "linux-universal" {
-            $p = Pack-LinuxUniversal
-            Record-Result $name "OK" $p
-        }
-        "macos-universal" {
-            $out = Join-Path $Dist "macos-universal"
-            if (-not (Test-Path $out)) { New-Item -ItemType Directory -Path $out | Out-Null }
-            $x64 = $null
-            $arm = $null
-            try { $x64 = Build-UnixGui -Triple "x86_64-apple-darwin" -DistName "macos-x64" } catch { Write-Warn $_.Exception.Message }
-            try { $arm = Build-UnixGui -Triple "aarch64-apple-darwin" -DistName "macos-arm64" } catch { Write-Warn $_.Exception.Message }
-            $slices = @()
-            if (Test-MachO $x64) { $slices += $x64 }
-            if (Test-MachO $arm) { $slices += $arm }
-            if ($slices.Count -eq 0) {
-                Write-Placeholder (Join-Path $out "payload") "macos-universal"
-                $x64Log = Join-Path $Dist "macos-x64\compile.log"
-                $armLog = Join-Path $Dist "macos-arm64\compile.log"
-                $hint = @"
-macOS Mach-O was not produced on this host (linker/Apple SDK).
-
-Do not download an Apple SDK from random mirrors. On a Mac (or with a legal SDK / osxcross):
-
-  rustup target add x86_64-apple-darwin aarch64-apple-darwin
-  cargo build --release --bin cubecheck --target x86_64-apple-darwin
-  cargo build --release --bin cubecheck --target aarch64-apple-darwin
-  lipo -create -output dist/macos-universal/cubecheck-macos-universal \
-    target/x86_64-apple-darwin/release/cubecheck \
-    target/aarch64-apple-darwin/release/cubecheck
-  ./build.sh macos-universal
-
-That writes build/CubeCheck-$Version-macos-universal.zip containing extensionless Mach-O ``cubecheck``.
-chmod +x cubecheck before running.
-
-See dist/macos-x64/compile.log and dist/macos-arm64/compile.log for the exact linker error.
-
-Typical Windows-host failure after rustc+ring compile:
-
-  xcrun --sdk macosx --show-sdk-path : program not found
-  unable to find dynamic system library 'objc' / 'iconv'
-  needs -framework AppKit CoreFoundation IOKit OpenGL Foundation …
-
-No MacOSX.sdk. Do not download Xcode SDKs from random mirrors.
-
-"@
-                Set-Content -LiteralPath (Join-Path $out "README.txt") -Value $hint -Encoding utf8
-                Record-Result $name "FAIL" "skipped: no Apple SDK/linker on this host"
-                throw "macos-universal: cannot produce a real Mach-O on this Windows PC. Recipe written to dist/macos-universal/README.txt"
-            }
-            $dest = Join-Path $out "cubecheck-macos-universal"
-            if ($slices.Count -eq 2 -and (Get-Command lipo -ErrorAction SilentlyContinue)) {
-                & lipo -create -output $dest $slices
-            } else {
-                $prefer = if (Test-MachO $arm) { $arm } else { $slices[0] }
-                Copy-FileForce $prefer $dest
-                if ($slices.Count -eq 2) {
-                    Write-Warn "lipo not found; zip will include cubecheck plus cubecheck-arm64 and cubecheck-x64 slices."
-                }
-            }
-            if (-not (Test-MachO $dest)) {
-                throw "macos-universal: output is not Mach-O ($dest)"
-            }
-            Record-Result $name "OK" $dest
-        }
-        "universal" {
-            if (-not (Test-Path (Join-Path $Dist "windows-x64\cubecheck-windows-x64.exe"))) {
-                Invoke-One "windows-x64"
-            }
-            if (-not (Test-Path (Join-Path $Dist "windows-x86\cubecheck-windows-x86.exe"))) {
-                try { Invoke-One "windows-x86" } catch { Write-Warn $_.Exception.Message }
-            }
-            $p = Pack-Universal $false
-            Record-Result $name "OK" $p
-        }
-        "universal-local" {
-            $missing = Test-VendorFiles
-            if ($missing.Count -gt 0) {
-                Record-Result $name "FAIL" ("missing " + ($missing -join ", "))
-                throw ("universal-local: missing vendor files in assets/:`n  " + ($missing -join "`n  "))
-            }
-            $p = Pack-Universal $true
-            Record-Result $name "OK" $p
-        }
-        default { throw "Unknown target '$name'. Try: build.bat help" }
+    } catch {
+        Warn "NativeAOT linux-x64 не собран: $($_.Exception.Message)"
     }
-    } finally {
-        try { Publish-ReleaseAssets } catch { Write-Warn "publish: $($_.Exception.Message)" }
+    if (-not $ok) {
+        if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Recurse -Force -ErrorAction SilentlyContinue }
     }
+    return $ok
 }
 
-function Show-Help {
-    @"
-CubeCheck build
-
-  build.bat                 windows-x64 (default) + setup
-  build.bat all             try every artifact
-  build.bat publish         rebuild build/ from dist/ (no compile)
-  build.bat windows-x64
-  build.bat windows-x86
-  build.bat linux-deb-x64
-  build.bat linux-deb-x86
-  build.bat linux-universal
-  build.bat macos-universal
-  build.bat universal
-  build.bat universal-local
-
-GitHub Release assets go to build/ (flat files only):
-  CubeCheck-<ver>-windows-x64-setup.exe
-  CubeCheck-<ver>-windows-x64.zip
-  CubeCheck-<ver>-windows-x86-setup.exe
-  CubeCheck-<ver>-windows-x86.zip
-  CubeCheck-<ver>-universal.zip
-  CubeCheck-<ver>-universal-local.zip
-  CubeCheck-Setup.exe                      (alias of the x64 installer)
-  CubeCheck-<ver>-linux-x64.sh             (self-extracting; only if ELF exists)
-  CubeCheck-<ver>-linux-x86.sh
-  CubeCheck-<ver>-linux-universal.sh
-  CubeCheck-<ver>-linux-deb-x64.deb        (only if usr/bin/cubecheck is ELF)
-  CubeCheck-<ver>-macos-universal.zip      (inner file: Mach-O cubecheck)
-
-Trees, junctions, README placeholders, and Debian pkg/ stay in dist/.
-universal-local never downloads; vendor files must already be in assets/.
-"@
-}
-
-$env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-$cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
-if (Test-Path $cargoBin) { $env:Path = "$cargoBin;$env:Path" }
-$zigExe = Get-ZigExe
-if ($zigExe) { $env:Path = "$(Split-Path -Parent $zigExe);$env:Path" }
-
-New-Item -ItemType Directory -Path $Dist -Force | Out-Null
-New-Item -ItemType Directory -Path $BuildOut -Force | Out-Null
-
-$t = $Target.Trim().ToLowerInvariant()
-if ($t -in @("help", "-h", "--help", "/?")) {
-    Show-Help
-    exit 0
-}
-
-Write-Host "========================================"
-Write-Host " CubeCheck  ($Version)"
-Write-Host "========================================"
-Write-Host ""
-
-if ($t -eq "publish") {
-    Write-Host "Publishing dist/ -> build/ (GitHub Release assets) ..."
-    Publish-ReleaseAssets
-    Show-ReleaseBuild
-    Write-Host "Done."
-    exit 0
-}
-
-Ensure-Cargo
-
-$allTargets = @(
-    "windows-x64", "windows-x86",
-    "linux-deb-x64", "linux-deb-x86", "linux-universal",
-    "macos-universal",
-    "universal", "universal-local"
-)
-
-Write-Host "Publishing dist/ -> build/ (GitHub Release assets) ..."
-Publish-ReleaseAssets
-Write-Host ""
-
-try {
-    if ($t -eq "all") {
-        foreach ($item in $allTargets) {
-            Write-Host ""
-            Write-Host "---- $item ----" -ForegroundColor Cyan
-            try { Invoke-One $item }
-            catch {
-                Write-Err $_.Exception.Message
-                if (-not ($script:Results | Where-Object { $_.Name -eq $item })) {
-                    Record-Result $item "FAIL" $_.Exception.Message
-                }
-            }
+function Stage-LinuxX64([string]$Elf, [string]$OutDir) {
+    if (Test-Path -LiteralPath $OutDir) { Remove-Item -LiteralPath $OutDir -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path (Join-Path $OutDir "assets") | Out-Null
+    Copy-Item -LiteralPath $Elf -Destination (Join-Path $OutDir "cubecheck") -Force
+    Write-LinuxLauncher (Join-Path $OutDir "cubecheck.sh")
+    foreach ($name in @("tools.json", "cubecheck.ico", "settings.default.json")) {
+        $from = Join-Path $root "assets\$name"
+        if (Test-Path -LiteralPath $from) {
+            Copy-Item -LiteralPath $from -Destination (Join-Path $OutDir "assets\$name") -Force
         }
+    }
+    Set-Content -Path (Join-Path $OutDir ".portable") -Value ""
+    Get-ChildItem -LiteralPath $OutDir -Force | ForEach-Object {
+        $keep = @("cubecheck", "cubecheck.sh", "assets", ".portable", "libcubecheck_api.so")
+        if ($keep -notcontains $_.Name) {
+            Remove-Item -LiteralPath $_.FullName -Recurse -Force
+        }
+    }
+    $so = Join-Path $dist "api-linux-x64\libcubecheck_api.so"
+    if ((Test-Path -LiteralPath $so) -and (Test-Elf $so)) {
+        Copy-Item -LiteralPath $so -Destination (Join-Path $OutDir "libcubecheck_api.so") -Force
     } else {
-        Invoke-One $t
+        Warn "В пакете нет libcubecheck_api.so. UI — Rust ELF; C# бэкенд нужно собрать на Linux: dotnet publish src/CubeCheck.Api -r linux-x64 -c Release"
     }
-} catch {
-    Write-Err $_.Exception.Message
-    if (-not ($script:Results | Where-Object { $_.Name -eq $t })) {
-        Record-Result $t "FAIL" $_.Exception.Message
+    Assert-LinuxPayload $OutDir
+}
+
+function Build-RustLinux([string]$OutDir) {
+    Info "Rust egui cubecheck (x86_64-unknown-linux-gnu) — не Avalonia"
+    Ensure-RustupTarget "x86_64-unknown-linux-gnu"
+    Use-AsciiTemp
+    [void](Try-PublishLinuxApi)
+
+    $triple = "x86_64-unknown-linux-gnu"
+    $elf = Join-Path $root "target\$triple\release\cubecheck"
+    $built = $false
+
+    Push-Location $root
+    try {
+        $haveZigbuild = $false
+        $homeAscii = [regex]::IsMatch([string]$env:USERPROFILE, '^[ -~\\:]+$')
+        if ($homeAscii -and (Get-Command cargo-zigbuild -ErrorAction SilentlyContinue)) { $haveZigbuild = $true }
+        elseif (-not $homeAscii) { Warn "cargo zigbuild пропущен: профиль не ASCII, zig-cc-filter + ASCII zig" }
+        if ($haveZigbuild) {
+            Info "cargo zigbuild --target $triple"
+            cargo zigbuild -p cubecheck --release --bin cubecheck --features gui --target $triple
+            if ($LASTEXITCODE -eq 0 -and (Test-Elf $elf)) {
+                $built = $true
+            } else {
+                Warn "cargo zigbuild не дал ELF (exit=$LASTEXITCODE), пробую zig-cc-filter + cargo"
+            }
+        }
+        if (-not $built) {
+            Set-ZigLinuxEnv
+            Info "cargo build --target $triple (zig cc)"
+            cargo build -p cubecheck --release --bin cubecheck --features gui --target $triple
+            if ($LASTEXITCODE -ne 0) {
+                throw "Кросс-сборка Rust Linux ELF не удалась (exit=$LASTEXITCODE). linux-x64 НЕ будет упакован из Avalonia DLL."
+            }
+        }
+    } finally {
+        Pop-Location
     }
-    Show-ReleaseBuild
+
+    if (-not (Test-Elf $elf)) {
+        throw "Нет Linux ELF после cargo: $elf. linux-x64 не пакуем (Avalonia запрещён)."
+    }
+    Info "Linux ELF: $elf ($((Get-Item $elf).Length) байт)"
+    Stage-LinuxX64 $elf $OutDir
+}
+
+# --- compile native first (needed by leftover .NET Windows publishes) ---
+$needNative = $Target -match "^(?i)(all|release|windows-x64|windows-x86|universal-win|universal|universal-local|github|installer|wizard)$"
+if ($needNative) {
+    Compile-Native "x64"
+    try { Compile-Native "x86" } catch { Warn $_.Exception.Message }
+}
+
+. (Join-Path $PSScriptRoot "Release-Universal.ps1")
+
+if ($Target -match "^(?i)(github|installer|wizard)$") {
+    if (-not (Test-Path (Join-Path $dist "windows-x64\cubecheck.exe"))) {
+        Warn "нет dist\windows-x64 — собираю windows-x64 для payload"
+        Build-RustWindows (Join-Path $dist "windows-x64") -SkipLegacyRelease
+    }
+    Stage-GithubPayload
+    Publish-WizardInstaller
     Write-Host ""
-    Write-Host "Failed."
-    exit 1
+    Write-Host "GitHub payload + wizard:"
+    foreach ($name in @("CubeCheck-$Version-github-payload.zip", "CubeCheck-$Version-universal-windows-setup.exe")) {
+        $p = Join-Path $buildOut $name
+        if (Test-Path $p) {
+            $i = Get-Item $p
+            Write-Host ("  {0,-62} {1,12:N0}" -f $i.Name, $i.Length)
+        } else {
+            Write-Host "  MISSING $name"
+        }
+    }
+    return
+}
+
+$win64Net8 = Join-Path $dist "windows-x64"
+$win64Fx = Join-Path $dist "windows-x64-win7"
+$win86 = Join-Path $dist "windows-x86"
+$linux64 = Join-Path $dist "linux-x64"
+$osx64 = Join-Path $dist "osx-x64"
+$osxArm = Join-Path $dist "osx-arm64"
+
+if ($Target -match "^(?i)(all|release|universal|universal-local)$") {
+    Publish-UniversalReleaseSet
+    Write-Host ""
+    Write-Host "Готово. Артефакты:"
+    Write-Host "  $dist"
+    Write-Host "  $buildOut"
+    Get-ChildItem $buildOut -ErrorAction SilentlyContinue | ForEach-Object {
+        Write-Host ("  {0,-48} {1,10:N0} байт" -f $_.Name, $_.Length)
+    }
+    return
+}
+
+$do = {
+    param($name)
+    $Target -match "^(?i)($name)$"
+}
+
+if (& $do "windows-x64") {
+    Build-RustWindows $win64Net8
+    Stage-Release "CubeCheck-$Version-windows-x64.zip" $win64Net8
+}
+
+if (& $do "windows-x86") {
+    Publish-WinNet48 "win-x86" $win86
+    Stage-Release "CubeCheck-$Version-windows-x86.zip" $win86
+}
+
+if ((& $do "universal-win") -or (& $do "universal") -or (& $do "universal-local")) {
+    Publish-WinNet48 "win-x64" $win64Fx
+    if (-not (Test-Path (Join-Path $win86 "cubecheck.exe"))) {
+        try { Publish-WinNet48 "win-x86" $win86 } catch { Warn $_.Exception.Message }
+    }
+}
+
+$linuxOk = $false
+if ((& $do "linux-x64") -or (& $do "linux-universal") -or (& $do "universal") -or (& $do "universal-local")) {
+    try {
+        Build-RustLinux $linux64
+        $linuxOk = Test-UnixRustPayload $linux64
+    } catch {
+        Warn $_.Exception.Message
+        Remove-DllDump $linux64 "leftover Avalonia/DLL в dist\linux-x64"
+        if (& $do "linux-x64") {
+            throw "linux-x64: нет Rust ELF. Avalonia больше не используется как замена."
+        }
+    }
+}
+
+if ((& $do "macos-universal") -or (& $do "universal") -or (& $do "universal-local")) {
+    Warn "macOS Mach-O с этой Windows-машины не собирается (нет Apple SDK / osxcross). Avalonia DLL не пакуем."
+    Remove-DllDump $osx64 "leftover Avalonia в dist\osx-x64"
+    Remove-DllDump $osxArm "leftover Avalonia в dist\osx-arm64"
+    if (& $do "macos-universal") {
+        Warn "macos-universal: пакет не создан — нет честного Mach-O, Avalonia запрещён."
+    }
+}
+
+if (& $do "linux-x64") {
+    if (-not $linuxOk) {
+        throw "linux-x64: нет Rust ELF payload. Архив не создан."
+    }
+    Assert-LinuxPayload $linux64
+    Clear-BuildAvaloniaJunk
+    $tar = Join-Path $buildOut "CubeCheck-$Version-linux-x64.tar.gz"
+    if (Test-Path -LiteralPath $tar) { Remove-Item -LiteralPath $tar -Force }
+    tar -czf $tar -C $linux64 .
+    if ($LASTEXITCODE -ne 0) { throw "tar linux-x64 не удался" }
+    Stage-Release "CubeCheck-$Version-linux-x64.zip" $linux64
+    $dllInTar = @(tar -tzf $tar | Where-Object { $_ -match '\.dll$' })
+    if ($dllInTar.Count -gt 0) {
+        throw "linux-x64.tar.gz всё ещё содержит .dll: $($dllInTar -join ', ')"
+    }
+}
+
+if ((& $do "linux-universal") -and $linuxOk) {
+    $lu = Join-Path $dist "linux-universal"
+    New-ShBundle "linux-universal" @{ "linux-x64" = $linux64 } $lu
+    Stage-Release "CubeCheck-$Version-linux-universal.zip" $lu
+}
+
+if (& $do "universal-win") {
+    $uw = Join-Path $dist "universal-win"
+    New-WinUniversal $uw $win64Fx $win86
+    Stage-Release "CubeCheck-$Version-universal-win.zip" $uw
+}
+
+if ((& $do "universal") -or (& $do "universal-local")) {
+    $uni = Join-Path $dist "universal\CubeCheck-universal"
+    if (Test-Path $uni) { Remove-Item $uni -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path (Join-Path $uni "payload") | Out-Null
+    Copy-Item (Join-Path $outNative "cubecheck-launcher.exe") (Join-Path $uni "cubecheck-launcher.exe") -Force -ErrorAction SilentlyContinue
+    Copy-Item (Join-Path $root "scripts\cubecheck.sh") (Join-Path $uni "cubecheck.sh") -Force
+    if (Test-Path (Join-Path $win64Fx "cubecheck.exe")) { Copy-Tree $win64Fx (Join-Path $uni "payload\windows-x64") }
+    elseif (Test-Path (Join-Path $win64Net8 "cubecheck.exe")) { Copy-Tree $win64Net8 (Join-Path $uni "payload\windows-x64") }
+    if (Test-Path (Join-Path $win86 "cubecheck.exe")) { Copy-Tree $win86 (Join-Path $uni "payload\windows-x86") }
+    if (Test-UnixRustPayload $linux64) { Copy-Tree $linux64 (Join-Path $uni "payload\linux-x64") }
+    else { Warn "universal: пропускаю linux-x64 (нет Rust ELF без .dll)" }
+    if (Test-UnixRustPayload $osx64) { Copy-Tree $osx64 (Join-Path $uni "payload\osx-x64") }
+    if (Test-UnixRustPayload $osxArm) { Copy-Tree $osxArm (Join-Path $uni "payload\osx-arm64") }
+    Stage-Release "CubeCheck-$Version-universal.zip" $uni
+
+    if (& $do "universal-local") {
+        $ul = Join-Path $dist "universal-local\CubeCheck-universal-local"
+        Copy-Tree $uni $ul
+        Set-Content -Path (Join-Path $ul ".offline") -Value ""
+        $assets = Join-Path $ul "payload\windows-x64\assets"
+        if (Test-Path $assets) {
+            [void](Copy-Vendor $assets)
+            Set-Content -Path (Join-Path $assets ".offline") -Value ""
+        }
+        Stage-Release "CubeCheck-$Version-universal-local.zip" $ul
+    }
 }
 
 Write-Host ""
-Write-Host "======== SUMMARY ========"
-foreach ($r in $script:Results) {
-    $color = if ($r.Status -eq "OK") { "Green" } else { "Red" }
-    Write-Host ("{0,-20} {1,-6} {2}" -f $r.Name, $r.Status, $r.Detail) -ForegroundColor $color
+Write-Host "Готово. Артефакты:"
+Write-Host "  $dist"
+Write-Host "  $buildOut"
+Get-ChildItem $buildOut -ErrorAction SilentlyContinue | ForEach-Object {
+    Write-Host ("  {0,-48} {1,10:N0} байт" -f $_.Name, $_.Length)
 }
-
-Show-ReleaseBuild
-
-$failed = @($script:Results | Where-Object { $_.Status -ne "OK" })
-if ($t -ne "all" -and $failed.Count -gt 0) { exit 1 }
-if ($t -eq "all") {
-    $win = $script:Results | Where-Object { $_.Name -eq "windows-x64" -and $_.Status -eq "OK" }
-    if (-not $win) { exit 1 }
-    Write-Host ""
-    Write-Host "all: finished. Non-Windows targets may be FAIL/skip on this host -- see above."
-}
-Write-Host "Done."
-exit 0

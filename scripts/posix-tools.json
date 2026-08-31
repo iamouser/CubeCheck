@@ -1,0 +1,113 @@
+{
+  "comment": "Official portable binaries fetched at build time for Linux/macOS offline packs. Not Windows Sysinternals. Do not commit the extracted binaries.",
+  "tools": [
+    {
+      "id": "fd",
+      "role": "search",
+      "name": "fd",
+      "publisher": "sharkdp",
+      "binary": "fd",
+      "archives": {
+        "linux-x64": { "url": "https://github.com/sharkdp/fd/releases/download/v10.5.0/fd-v10.5.0-x86_64-unknown-linux-musl.tar.gz", "kind": "tar" },
+        "linux-x86": { "url": "https://github.com/sharkdp/fd/releases/download/v10.5.0/fd-v10.5.0-i686-unknown-linux-musl.tar.gz", "kind": "tar" },
+        "osx-x64": { "url": "https://github.com/sharkdp/fd/releases/download/v10.5.0/fd-v10.5.0-x86_64-apple-darwin.tar.gz", "kind": "tar" },
+        "osx-arm64": { "url": "https://github.com/sharkdp/fd/releases/download/v10.5.0/fd-v10.5.0-aarch64-apple-darwin.tar.gz", "kind": "tar" }
+      }
+    },
+    {
+      "id": "rg",
+      "role": "search",
+      "name": "ripgrep",
+      "publisher": "BurntSushi",
+      "binary": "rg",
+      "archives": {
+        "linux-x64": { "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz", "kind": "tar" },
+        "linux-x86": { "url": "https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/ripgrep-14.1.1-i686-unknown-linux-gnu.tar.gz", "kind": "tar" },
+        "osx-x64": { "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-apple-darwin.tar.gz", "kind": "tar" },
+        "osx-arm64": { "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-apple-darwin.tar.gz", "kind": "tar" }
+      }
+    },
+    {
+      "id": "fzf",
+      "role": "search",
+      "name": "fzf",
+      "publisher": "junegunn",
+      "binary": "fzf",
+      "archives": {
+        "linux-x64": { "url": "https://github.com/junegunn/fzf/releases/download/v0.74.3/fzf-0.74.3-linux_amd64.tar.gz", "kind": "tar" },
+        "osx-x64": { "url": "https://github.com/junegunn/fzf/releases/download/v0.74.3/fzf-0.74.3-darwin_amd64.tar.gz", "kind": "tar" },
+        "osx-arm64": { "url": "https://github.com/junegunn/fzf/releases/download/v0.74.3/fzf-0.74.3-darwin_arm64.tar.gz", "kind": "tar" }
+      }
+    },
+    {
+      "id": "btop",
+      "role": "processes",
+      "name": "btop",
+      "publisher": "aristocratos",
+      "binary": "btop",
+      "archives": {
+        "linux-x64": { "url": "https://github.com/aristocratos/btop/releases/download/v1.4.7/btop-x86_64-unknown-linux-musl.tar.gz", "kind": "tar" },
+        "linux-x86": { "url": "https://github.com/aristocratos/btop/releases/download/v1.4.7/btop-i686-unknown-linux-musl.tar.gz", "kind": "tar" }
+      }
+    },
+    {
+      "id": "btm",
+      "role": "processes",
+      "name": "bottom",
+      "publisher": "ClementTsang",
+      "binary": "btm",
+      "archives": {
+        "linux-x64": { "url": "https://github.com/ClementTsang/bottom/releases/download/0.14.9/bottom_x86_64-unknown-linux-musl.tar.gz", "kind": "tar" },
+        "linux-x86": { "url": "https://github.com/ClementTsang/bottom/releases/download/0.14.9/bottom_i686-unknown-linux-musl.tar.gz", "kind": "tar" },
+        "osx-x64": { "url": "https://github.com/ClementTsang/bottom/releases/download/0.14.9/bottom_x86_64-apple-darwin.tar.gz", "kind": "tar" },
+        "osx-arm64": { "url": "https://github.com/ClementTsang/bottom/releases/download/0.14.9/bottom_aarch64-apple-darwin.tar.gz", "kind": "tar" }
+      }
+    },
+    {
+      "id": "procs",
+      "role": "procexp",
+      "name": "procs",
+      "publisher": "dalance",
+      "binary": "procs",
+      "archives": {
+        "linux-x64": { "url": "https://github.com/dalance/procs/releases/download/v0.14.12/procs-v0.14.12-x86_64-linux.zip", "kind": "zip" },
+        "osx-x64": { "url": "https://github.com/dalance/procs/releases/download/v0.14.12/procs-v0.14.12-x86_64-mac.zip", "kind": "zip" },
+        "osx-arm64": { "url": "https://github.com/dalance/procs/releases/download/v0.14.12/procs-v0.14.12-aarch64-mac.zip", "kind": "zip" }
+      }
+    },
+    {
+      "id": "lf",
+      "role": "files",
+      "name": "lf",
+      "publisher": "gokcehan",
+      "binary": "lf",
+      "archives": {
+        "linux-x64": { "url": "https://github.com/gokcehan/lf/releases/download/r42/lf-linux-amd64.tar.gz", "kind": "tar" },
+        "linux-x86": { "url": "https://github.com/gokcehan/lf/releases/download/r42/lf-linux-386.tar.gz", "kind": "tar" },
+        "osx-x64": { "url": "https://github.com/gokcehan/lf/releases/download/r42/lf-darwin-amd64.tar.gz", "kind": "tar" },
+        "osx-arm64": { "url": "https://github.com/gokcehan/lf/releases/download/r42/lf-darwin-arm64.tar.gz", "kind": "tar" }
+      }
+    },
+    {
+      "id": "busybox",
+      "role": "monitor",
+      "name": "busybox",
+      "publisher": "BusyBox",
+      "binary": "busybox",
+      "archives": {
+        "linux-x64": { "url": "https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox", "kind": "bin" },
+        "linux-x86": { "url": "https://busybox.net/downloads/binaries/1.35.0-i686-linux-musl/busybox", "kind": "bin" }
+      }
+    },
+    {
+      "id": "missioncenter",
+      "role": "processes",
+      "name": "Mission Center",
+      "publisher": "mission-center-devs",
+      "binary": "missioncenter",
+      "archives": {
+        "linux-x64": { "url": "https://gitlab.com/mission-center-devs/mission-center/-/jobs/15536631699/artifacts/raw/MissionCenter-1.2.0-x86_64.AppImage", "kind": "appimage" }
+      }
+    }
+  ]
+}

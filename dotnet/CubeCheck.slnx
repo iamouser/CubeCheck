@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="CubeCheck.App/CubeCheck.App.csproj" />
+  <Project Path="CubeCheck.Core/CubeCheck.Core.csproj" />
+  <Project Path="CubeCheck.Setup/CubeCheck.Setup.csproj" />
+  <Project Path="CubeCheck.Desktop/CubeCheck.Desktop.csproj" />
+</Solution>

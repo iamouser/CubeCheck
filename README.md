@@ -1,12 +1,8 @@
 # CubeCheck
 
-Desktop checker for Minecraft clients: scans the PC for known cheat names and launches official forensic / sysadmin utilities. Windows-first; Linux and macOS use **verified OS builtins and well-known FOSS tools** for the same checker jobs.
-
----
-
 **CubeCheck** — программа, которая помогает проверить компьютер на читы Minecraft. Она ищет известные имена читов в процессах, файлах, автозагрузке и логах, сохраняет отчёт и запускает утилиты проверки.
 
-Авторы: **AuraStudio**, **AnProject**. Канал: [@cubecheck](https://telegram.me/cubecheck). Версия: 1.0 beta.
+Авторы: **[AuraStudio](https://telegram.me/cubecheck)**, **[AnProject](https://discord.gg/Dwqu8xmaEc)**.
 
 ## Возможности
 

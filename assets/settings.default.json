@@ -3,8 +3,8 @@
   "zoom": 1.0,
   "glow": {
     "enabled": true,
-    "color": [212, 175, 55],
-    "color2": [255, 214, 90],
+    "color": "#D4AF37",
+    "color2": "#FFD65A",
     "gradient": false,
     "gradient_speed": 1.0,
     "radius": 34.0,
@@ -16,5 +16,6 @@
       "footer": true
     }
   },
-  "autosave": "on_change"
+  "autosave": "on_change",
+  "check_updates": true
 }

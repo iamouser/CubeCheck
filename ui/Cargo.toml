@@ -1,6 +1,6 @@
 [package]
 name = "cubecheck"
-version = "1.1.0-beta"
+version = "1.1.1"
 edition = "2021"
 authors = ["AuraStudio", "AnProject"]
 description = "CubeCheck — проверка ПК на читы Minecraft"

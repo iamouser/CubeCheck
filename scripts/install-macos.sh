@@ -1,11 +1,11 @@
 #!/bin/sh
-# CubeCheck 1.1 beta — установщик macOS (те же шаги, что и мастер).
+# CubeCheck 1.1.1 — установщик macOS (те же шаги, что и мастер).
 # Mach-O cubecheck / CubeCheck.app могут отсутствовать, если пакет собран на Windows.
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PRODUCT=CubeCheck
-VERSION="1.1 beta"
+VERSION="1.1.1"
 AUTHORS="AuraStudio, AnProject"
 PAYLOAD_URL="${CUBECHECK_PAYLOAD_URL:-https://github.com/jumpworlds/CubeCheck-payload/archive/refs/heads/main.zip}"
 
@@ -142,7 +142,7 @@ if [ -z "$SRC" ] && ! is_offline; then
   TMP_DL=$(mktemp -d "${TMPDIR:-/tmp}/cubecheck-dl.XXXXXX")
   zip="$TMP_DL/payload.zip"
   if command -v curl >/dev/null 2>&1; then
-    curl -L --fail --retry 3 -A "CubeCheck-Setup/1.1-beta" -o "$zip" "$PAYLOAD_URL"
+    curl -L --fail --retry 3 -A "CubeCheck-Setup/1.1.1" -o "$zip" "$PAYLOAD_URL"
   elif command -v wget >/dev/null 2>&1; then
     wget -O "$zip" "$PAYLOAD_URL"
   else
@@ -182,7 +182,16 @@ echo "=== 4. Установка ==="
 mkdir -p "$dest/assets/bin" "$dest/reports"
 if [ "$HAVE_APP" -eq 1 ]; then
   echo "Копирование CubeCheck в $dest …"
+  saved_settings=""
+  if [ -f "$dest/settings.json" ]; then
+    saved_settings=$(mktemp)
+    cp "$dest/settings.json" "$saved_settings"
+  fi
   cp -a "$SRC/." "$dest/"
+  if [ -n "$saved_settings" ]; then
+    cp "$saved_settings" "$dest/settings.json"
+    rm -f "$saved_settings"
+  fi
   chmod +x "$dest/cubecheck" "$dest/cubecheck.sh" 2>/dev/null || true
 fi
 if [ -n "$EXTRAS" ]; then

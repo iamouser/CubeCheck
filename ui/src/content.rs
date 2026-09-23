@@ -1,4 +1,4 @@
-pub const APP_VERSION: &str = "1.1 beta";
+pub const APP_VERSION: &str = "1.1.1";
 
 pub const AUTHORS: &str = "AuraStudio, AnProject";
 
@@ -25,4 +25,4 @@ fs_usage, Login Items/LaunchAgents, Корзина.
 
 Авторы: AuraStudio, AnProject
 Канал: @cubecheck
-Версия: 1.1 beta";
+Версия: 1.1.1";

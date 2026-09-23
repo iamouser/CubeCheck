@@ -85,18 +85,20 @@ public sealed class RgbArrayConverter : JsonConverter<byte[]>
         if (reader.TokenType == JsonTokenType.String)
         {
             var raw = reader.GetString();
-            if (!string.IsNullOrEmpty(raw))
+            if (HexColor.TryParse(raw, out var parsed)) return parsed;
+            if (!string.IsNullOrEmpty(raw) && raw[0] != '#')
             {
                 try
                 {
                     var decoded = Convert.FromBase64String(raw);
-                    if (decoded.Length >= 3) return decoded;
+                    if (decoded.Length >= 3) return [decoded[0], decoded[1], decoded[2]];
                 }
                 catch
                 {
-                    // Rust and settings.default.json use [r,g,b]
+                    // keep fallback
                 }
             }
+            return Fallback;
         }
 
         reader.Skip();
@@ -105,12 +107,7 @@ public sealed class RgbArrayConverter : JsonConverter<byte[]>
 
     public override void Write(Utf8JsonWriter writer, byte[] value, JsonSerializerOptions options)
     {
-        var rgb = value is { Length: >= 3 } ? value : Fallback;
-        writer.WriteStartArray();
-        writer.WriteNumberValue(rgb[0]);
-        writer.WriteNumberValue(rgb[1]);
-        writer.WriteNumberValue(rgb[2]);
-        writer.WriteEndArray();
+        writer.WriteStringValue(HexColor.Format(value));
     }
 }
 
@@ -161,6 +158,7 @@ public sealed class AppConfig
     public float Zoom { get; set; } = 1.0f;
     public GlowConfig Glow { get; set; } = new();
     public AutosaveMode Autosave { get; set; } = AutosaveMode.OnChange;
+    public bool CheckUpdates { get; set; } = true;
 
     [JsonIgnore]
     public ThemeId ThemeId => ThemeColors.FromKey(Theme);

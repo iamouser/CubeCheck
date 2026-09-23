@@ -1,12 +1,12 @@
 #!/bin/sh
-# CubeCheck 1.1 beta — установщик Linux (те же шаги, что и мастер).
+# CubeCheck 1.1.1 — установщик Linux (те же шаги, что и мастер).
 # Онлайн: локальный payload или загрузка GitHub zip.
 # Офлайн: только локальные файлы, без HTTP.
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PRODUCT=CubeCheck
-VERSION="1.1 beta"
+VERSION="1.1.1"
 AUTHORS="AuraStudio, AnProject"
 PAYLOAD_URL="${CUBECHECK_PAYLOAD_URL:-https://github.com/jumpworlds/CubeCheck-payload/archive/refs/heads/main.zip}"
 
@@ -140,7 +140,7 @@ if [ -z "$SRC" ]; then
   TMP_DL=$(mktemp -d "${TMPDIR:-/tmp}/cubecheck-dl.XXXXXX")
   zip="$TMP_DL/payload.zip"
   if command -v curl >/dev/null 2>&1; then
-    curl -L --fail --retry 3 -A "CubeCheck-Setup/1.1-beta" -o "$zip" "$PAYLOAD_URL"
+    curl -L --fail --retry 3 -A "CubeCheck-Setup/1.1.1" -o "$zip" "$PAYLOAD_URL"
   elif command -v wget >/dev/null 2>&1; then
     wget -O "$zip" "$PAYLOAD_URL"
   else
@@ -156,7 +156,16 @@ echo
 echo "=== 4. Установка ==="
 mkdir -p "$dest"
 echo "Копирование в $dest …"
+saved_settings=""
+if [ -f "$dest/settings.json" ]; then
+  saved_settings=$(mktemp)
+  cp "$dest/settings.json" "$saved_settings"
+fi
 cp -a "$SRC/." "$dest/"
+if [ -n "$saved_settings" ]; then
+  cp "$saved_settings" "$dest/settings.json"
+  rm -f "$saved_settings"
+fi
 chmod +x "$dest/cubecheck" "$dest/cubecheck.sh" "$dest/assets/bin/"* 2>/dev/null || true
 mkdir -p "$dest/reports"
 if [ ! -f "$dest/settings.json" ] && [ -f "$dest/assets/settings.default.json" ]; then

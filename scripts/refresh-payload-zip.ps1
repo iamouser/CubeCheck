@@ -9,7 +9,8 @@ Get-ChildItem -LiteralPath $upload -Recurse -File | Where-Object { $_.Name -ne '
 $utf8 = New-Object System.Text.UTF8Encoding $false
 $sums = Join-Path $upload 'SHA256SUMS'
 [System.IO.File]::WriteAllLines($sums, $lines, $utf8)
-$zip = Join-Path (Join-Path $PSScriptRoot '..\build' | Resolve-Path) 'CubeCheck-1.1.0-beta-github-payload.zip'
+$Version = '1.1.1'
+$zip = Join-Path (Join-Path $PSScriptRoot '..\build' | Resolve-Path) "CubeCheck-$Version-github-payload.zip"
 if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
 Compress-Archive -Path (Join-Path $upload '*') -DestinationPath $zip -CompressionLevel Optimal
 Get-Item -LiteralPath $zip | Format-List FullName, Length, LastWriteTime

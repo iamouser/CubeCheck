@@ -52,6 +52,8 @@ struct Api {
     perform_scan: ScanFn,
     download_tools: DownloadFn,
     save_report: SaveReportFn,
+    check_update: Option<StringOutFn>,
+    apply_update: Option<RunUtilFn>,
     user_name: StringOutFn,
     computer_name: StringOutFn,
     install_date: StringOutFn,
@@ -145,6 +147,8 @@ fn load_api() -> Result<Api, String> {
                     perform_scan: load_symbol(&lib, b"cc_host_perform_scan\0")?,
                     download_tools: load_symbol(&lib, b"cc_host_download_tools\0")?,
                     save_report: load_symbol(&lib, b"cc_host_save_report\0")?,
+                    check_update: load_symbol(&lib, b"cc_host_check_update\0").ok(),
+                    apply_update: load_symbol(&lib, b"cc_host_apply_update\0").ok(),
                     user_name: load_symbol(&lib, b"cc_host_user_name\0")?,
                     computer_name: load_symbol(&lib, b"cc_host_computer_name\0")?,
                     install_date: load_symbol(&lib, b"cc_host_install_date\0")?,
@@ -448,5 +452,48 @@ pub fn os_info_label() -> String {
     match api() {
         Ok(host) => call_string(host.os_info_label).unwrap_or_else(|_| "Система".into()),
         Err(_) => "Система".into(),
+    }
+}
+
+pub fn check_update() -> Result<Option<String>, String> {
+    let api = api()?;
+    let Some(func) = api.check_update else {
+        return Ok(None);
+    };
+    let mut ptr: *mut c_char = std::ptr::null_mut();
+    if unsafe { func(&mut ptr) } != 0 {
+        return Ok(None);
+    }
+    let text = take_string(api, ptr);
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    let value: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(value) => value,
+        Err(_) => return Ok(None),
+    };
+    let url = value
+        .get("installer")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if url.starts_with("https://") {
+        Ok(Some(url))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn apply_update(url: &str) -> Result<(), String> {
+    let api = api()?;
+    let Some(func) = api.apply_update else {
+        return Err("Обновление недоступно".into());
+    };
+    let url = cstr(url)?;
+    if unsafe { func(url.as_ptr()) } == 0 {
+        Ok(())
+    } else {
+        Err(last_error(api))
     }
 }

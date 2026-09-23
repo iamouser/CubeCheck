@@ -1,3 +1,4 @@
+use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 
 use crate::theme::ThemeId;
@@ -80,7 +81,17 @@ impl GlowAreas {
 #[serde(default)]
 pub struct GlowConfig {
     pub enabled: bool,
+    #[serde(
+        default = "default_color",
+        deserialize_with = "de_color",
+        serialize_with = "ser_color"
+    )]
     pub color: [u8; 3],
+    #[serde(
+        default = "default_color2",
+        deserialize_with = "de_color2",
+        serialize_with = "ser_color"
+    )]
     pub color2: [u8; 3],
     pub gradient: bool,
     pub gradient_speed: f32,
@@ -128,6 +139,8 @@ pub struct AppConfig {
     pub glow: GlowConfig,
     #[serde(default)]
     pub autosave: AutosaveMode,
+    #[serde(default = "default_check_updates")]
+    pub check_updates: bool,
 }
 
 fn default_theme() -> String {
@@ -136,6 +149,18 @@ fn default_theme() -> String {
 
 fn default_zoom() -> f32 {
     1.0
+}
+
+fn default_check_updates() -> bool {
+    true
+}
+
+fn default_color() -> [u8; 3] {
+    [212, 175, 55]
+}
+
+fn default_color2() -> [u8; 3] {
+    [255, 214, 90]
 }
 
 pub fn clamp_zoom(zoom: f32) -> f32 {
@@ -161,6 +186,7 @@ impl Default for AppConfig {
             zoom: default_zoom(),
             glow: GlowConfig::default(),
             autosave: AutosaveMode::default(),
+            check_updates: true,
         }
     }
 }
@@ -207,5 +233,77 @@ impl AppConfig {
     pub fn set_zoom(&mut self, zoom: f32) {
         self.zoom = clamp_zoom(zoom);
     }
+}
+
+fn ser_color<S>(rgb: &[u8; 3], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&format_hex(*rgb))
+}
+
+fn de_color<'de, D>(deserializer: D) -> Result<[u8; 3], D::Error>
+where
+    D: Deserializer<'de>,
+{
+    parse_color_value(deserializer, default_color())
+}
+
+fn de_color2<'de, D>(deserializer: D) -> Result<[u8; 3], D::Error>
+where
+    D: Deserializer<'de>,
+{
+    parse_color_value(deserializer, default_color2())
+}
+
+fn parse_color_value<'de, D>(deserializer: D, fallback: [u8; 3]) -> Result<[u8; 3], D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(parse_rgb_value(&value).unwrap_or(fallback))
+}
+
+fn parse_rgb_value(value: &serde_json::Value) -> Option<[u8; 3]> {
+    match value {
+        serde_json::Value::String(text) => parse_hex(text),
+        serde_json::Value::Array(items) if items.len() >= 3 => {
+            let r = items[0].as_u64()?;
+            let g = items[1].as_u64()?;
+            let b = items[2].as_u64()?;
+            if r > 255 || g > 255 || b > 255 {
+                return None;
+            }
+            Some([r as u8, g as u8, b as u8])
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn format_hex(rgb: [u8; 3]) -> String {
+    format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2])
+}
+
+pub(crate) fn parse_hex(text: &str) -> Option<[u8; 3]> {
+    let s = text.trim();
+    let s = s.strip_prefix('#').unwrap_or(s);
+    let s = if s.len() == 3 || s.len() == 4 {
+        let mut expanded = String::new();
+        for c in s.chars() {
+            expanded.push(c);
+            expanded.push(c);
+        }
+        expanded
+    } else {
+        s.to_string()
+    };
+    let s = if s.len() == 8 { s[2..].to_string() } else { s };
+    if s.len() != 6 || !s.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+    Some([r, g, b])
 }
 

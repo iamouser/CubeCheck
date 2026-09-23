@@ -5,11 +5,17 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <RootNamespace>CubeCheck</RootNamespace>
-    <Version>1.1.0</Version>
-    <InformationalVersion>1.1 beta</InformationalVersion>
+    <Version>1.1.1</Version>
+    <InformationalVersion>1.1.1</InformationalVersion>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <PublishAot>false</PublishAot>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="everything-list.txt">
+      <LogicalName>CubeCheck.everything-list.txt</LogicalName>
+    </EmbeddedResource>
+    <None Remove="everything-list.txt" />
+  </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)'=='net48'">
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
     <PackageReference Include="System.Runtime.InteropServices.RuntimeInformation" Version="4.3.0" />

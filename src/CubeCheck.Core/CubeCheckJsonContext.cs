@@ -17,6 +17,7 @@ namespace CubeCheck;
 [JsonSerializable(typeof(ToolSpec))]
 [JsonSerializable(typeof(ExtractRule))]
 [JsonSerializable(typeof(byte[]))]
+[JsonSerializable(typeof(UpdateOffer))]
 public partial class CubeCheckJsonContext : JsonSerializerContext
 {
 }

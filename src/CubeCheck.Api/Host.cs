@@ -287,4 +287,34 @@ public static unsafe class Host
         try { return OkString(dest, SystemInfo.OsInfoLabel); }
         catch (Exception ex) { return FailOut(dest, ex); }
     }
+
+    [UnmanagedCallersOnly(EntryPoint = "cc_host_check_update", CallConvs = [typeof(CallConvCdecl)])]
+    public static int CheckUpdate(byte** jsonOut)
+    {
+        try
+        {
+            var offer = AppUpdate.Check();
+            return OkString(jsonOut, offer == null ? "" : offer.ToJson());
+        }
+        catch (Exception ex)
+        {
+            return FailOut(jsonOut, ex);
+        }
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "cc_host_apply_update", CallConvs = [typeof(CallConvCdecl)])]
+    public static int ApplyUpdate(byte* url)
+    {
+        try
+        {
+            var path = AppUpdate.DownloadInstaller(PtrToString(url));
+            AppUpdate.StartInstaller(path, AppPaths.DataDir);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Fail(ex);
+            return 1;
+        }
+    }
 }

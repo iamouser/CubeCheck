@@ -2,10 +2,12 @@ namespace CubeCheck;
 
 public static class Content
 {
-    public const string AppVersion = "1.1 beta";
+    public const string AppVersion = "1.1.1";
     public const string Authors = "AuraStudio, AnProject";
     public const string TelegramUrl = "https://telegram.me/cubecheck";
     public const string HolyCheckUrl = "https://mods.holyworld.me/";
+    public const string UpdateManifestUrl =
+        "https://raw.githubusercontent.com/jumpworlds/CubeCheck-payload/main/version.json";
 
     public const string AboutText =
         """
@@ -28,6 +30,6 @@ public static class Content
 
         Авторы: AuraStudio, AnProject
         Канал: @cubecheck
-        Версия: 1.1 beta
+        Версия: 1.1.1
         """;
 }

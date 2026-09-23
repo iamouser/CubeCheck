@@ -155,26 +155,28 @@ public static class ToolLauncher
 
     public static void RunEverythingWithSearch(IEnumerable<string> terms)
     {
+        var list = terms.ToArray();
         if (!Compat.IsWindows)
         {
-            RunPosixSearch(Catalog.EverythingSearchQuery(terms));
+            RunPosixSearch(Catalog.EverythingSearchQuery(list), list);
             return;
         }
         var path = AppPaths.ToolPath("everything");
         if (!File.Exists(path)) throw new InvalidOperationException(Missing("Everything.exe"));
-        Spawn(path, "-search", Catalog.EverythingSearchQuery(terms));
+        Spawn(path, "-search", Catalog.EverythingSearchQuery(list));
     }
 
-    public static void RunAutocheckSearch() => RunEverythingWithSearch(Catalog.CheatNames);
+    public static void RunAutocheckSearch() => RunEverythingWithSearch(Catalog.EverythingNames);
 
-    static void RunPosixSearch(string? query)
+    static void RunPosixSearch(string? query, IReadOnlyList<string>? terms = null)
     {
         if (Compat.IsMac)
         {
             var mdfind = Which.Find("mdfind");
             if (mdfind != null && !string.IsNullOrEmpty(query))
             {
-                var orQuery = string.Join(" OR ", Catalog.CheatNames.Select(n => n.Contains(' ') ? "\"" + n + "\"" : n));
+                var names = terms ?? Catalog.EverythingNames;
+                var orQuery = string.Join(" OR ", names.Select(n => n.Contains(' ') ? "\"" + n + "\"" : n));
                 var script = "mdfind " + Quote(orQuery);
                 Spawn("osascript", "-e", "tell application \"Terminal\" to do script " + Quote(script));
                 return;
@@ -199,7 +201,8 @@ public static class ToolLauncher
         {
             var term = Which.Find("x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal", "xterm")
                        ?? throw new InvalidOperationException(Missing("терминал"));
-            Spawn(term, "-e", locate + " " + Catalog.CheatNames[0]);
+            var needle = FirstTerm(terms) ?? Catalog.EverythingNames[0];
+            Spawn(term, "-e", locate + " " + needle);
             return;
         }
         if (Which.Find("fzf") is { } fzf && Which.Find("fd") is { } fdFzf)
@@ -218,6 +221,16 @@ public static class ToolLauncher
             return;
         }
         throw new InvalidOperationException("В assets/bin нет fd/rg/fzf.");
+    }
+
+    static string? FirstTerm(IReadOnlyList<string>? terms)
+    {
+        if (terms == null) return null;
+        foreach (var term in terms)
+        {
+            if (!string.IsNullOrEmpty(term)) return term;
+        }
+        return null;
     }
 
     static void OpenRecentFiles()

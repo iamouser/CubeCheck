@@ -73,6 +73,8 @@ fn main() -> eframe::Result<()> {
         std::process::exit(1);
     }
 
+    let (startup_offer, late_update) = startup_update();
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([WINDOW_WIDTH, WINDOW_HEIGHT])
@@ -87,12 +89,38 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "CubeCheck",
         options,
-        Box::new(|cc| {
+        Box::new(move |cc| {
             let config = config::AppConfig::load();
             apply_saved_zoom(&cc.egui_ctx, config.zoom);
-            Ok(Box::new(ui::CubeCheckApp::new(cc)))
+            Ok(Box::new(ui::CubeCheckApp::new(cc, startup_offer, late_update)))
         }),
     )
+}
+
+fn startup_update() -> (
+    Option<String>,
+    Option<std::sync::mpsc::Receiver<Option<String>>>,
+) {
+    let enabled = config::AppConfig::load().check_updates;
+    if !enabled || backend::is_offline() {
+        return (None, None);
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let offer = backend::check_update().ok().flatten();
+        let _ = tx.send(offer);
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(6)) {
+        Ok(Some(url)) => {
+            if backend::apply_update(&url).is_ok() {
+                std::process::exit(0);
+            }
+            (Some(url), None)
+        }
+        Ok(None) => (None, None),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => (None, Some(rx)),
+        Err(_) => (None, None),
+    }
 }
 
 fn apply_saved_zoom(ctx: &egui::Context, zoom: f32) {

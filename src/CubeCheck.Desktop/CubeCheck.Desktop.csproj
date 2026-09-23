@@ -9,8 +9,8 @@
     <AssemblyName>cubecheck</AssemblyName>
     <ApplicationIcon>..\..\assets\cubecheck.ico</ApplicationIcon>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
-    <Version>1.1.0</Version>
-    <InformationalVersion>1.1 beta</InformationalVersion>
+    <Version>1.1.1</Version>
+    <InformationalVersion>1.1.1</InformationalVersion>
     <RuntimeIdentifiers>linux-x64;osx-x64;osx-arm64;win-x64</RuntimeIdentifiers>
   </PropertyGroup>
   <ItemGroup>

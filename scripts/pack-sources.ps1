@@ -1,18 +1,18 @@
-# Pack CubeCheck sources (no build artifacts, no vendor tools, no dist/build output).
+# Pack CubeCheck sources into build\sources and build\CubeCheck-<ver>-sources.zip
+# (no build artifacts, no vendor tools, no dist/build output).
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$Version = '1.1.0-beta'
-$stagingRoot = Join-Path $root "build\sources-staging"
-$staging = Join-Path $stagingRoot "CubeCheck-$Version"
+$Version = '1.1.1'
+$staging = Join-Path $root "build\sources"
 $zip = Join-Path $root "build\CubeCheck-$Version-sources.zip"
 
-$excludeDirNames = @('obj', 'target', 'build', 'dist', 'dist-dotnet', '.zig-wrappers', 'posix-cache', '.git', '.idea', '.vscode')
+$excludeDirNames = @('obj', 'target', 'build', 'dist', 'dist-dotnet', '.vs', '.zig-wrappers', 'posix-cache', '.git', '.idea', '.vscode')
 $excludeFileNames = @(
     'Everything.exe', 'Everything.db', 'Everything.ini',
     'Shellbag.exe', 'Procmon64.exe', 'Autoruns64.exe', 'procexp64.exe',
     'settings.json', 'CubeCheck-error.txt'
 )
-$excludeExtensions = @('.exe', '.dll', '.pdb', '.log', '.pem', '.key')
+$excludeExtensions = @('.exe', '.dll', '.pdb', '.log', '.pem', '.key', '.user', '.suo')
 
 function Should-SkipFile([System.IO.FileInfo]$f) {
     if ($excludeFileNames -contains $f.Name) { return $true }
@@ -44,14 +44,14 @@ function Copy-SourceTree([string]$srcRel) {
     }
 }
 
-if (Test-Path -LiteralPath $stagingRoot) { Remove-Item -LiteralPath $stagingRoot -Recurse -Force }
+if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $staging | Out-Null
 
-foreach ($dir in @('src', 'ui', 'crates', 'scripts', 'assets', 'dotnet')) {
+foreach ($dir in @('src', 'ui', 'crates', 'scripts', 'assets', 'dotnet', '.github')) {
     Copy-SourceTree $dir
 }
 
-foreach ($file in @('LICENSE.md', 'Cargo.toml', 'Cargo.lock', 'build.bat', 'build-dotnet.ps1', '.gitignore')) {
+foreach ($file in @('LICENSE.md', 'Cargo.toml', 'Cargo.lock', 'build.bat', 'build-dotnet.ps1', 'START.bat', '.gitignore')) {
     $from = Join-Path $root $file
     if (Test-Path -LiteralPath $from) {
         Copy-Item -LiteralPath $from -Destination (Join-Path $staging $file) -Force
@@ -61,10 +61,12 @@ foreach ($file in @('LICENSE.md', 'Cargo.toml', 'Cargo.lock', 'build.bat', 'buil
 if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
 Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zip -CompressionLevel Optimal
 
-$fileCount = (Get-ChildItem -LiteralPath $staging -Recurse -File).Count
-$size = (Get-Item -LiteralPath $zip).Length
-Remove-Item -LiteralPath $stagingRoot -Recurse -Force
+$fileCount = (Get-ChildItem -LiteralPath $staging -Recurse -File -Force).Count
+$dirSize = (Get-ChildItem -LiteralPath $staging -Recurse -File -Force | Measure-Object -Property Length -Sum).Sum
+$zipSize = (Get-Item -LiteralPath $zip).Length
 
+Write-Host "sources: $staging"
 Write-Host "sources zip: $zip"
 Write-Host "files: $fileCount"
-Write-Host "size: $size bytes"
+Write-Host "tree size: $dirSize bytes"
+Write-Host "zip size: $zipSize bytes"

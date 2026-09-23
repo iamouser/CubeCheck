@@ -8,6 +8,8 @@
 #   CubeCheck-<ver>-universal-macos-offline-setup.run      Darwin portables, no download
 #   CubeCheck-<ver>-universal-macos-README.txt
 #   CubeCheck-<ver>-github-payload.zip
+#   CubeCheck-<ver>-sources.zip
+#   build\sources\                                         full clean source tree
 # Other targets: github | installer | wizard | windows-x64 | windows-x86 | linux-x64 | ...
 # Linux/macOS UI = Rust egui ELF/Mach-O. Avalonia publish is not a release product.
 # CubeCheck.Installer = thin WPF FDD wizard (online downloads GitHub payload; offline embeds zip).
@@ -23,7 +25,7 @@ $native = Join-Path $dotnet "native"
 $outNative = Join-Path $native "bin"
 $dist = Join-Path $root "dist"
 $buildOut = Join-Path $root "build"
-$Version = "1.1.0-beta"
+$Version = "1.1.1"
 $cfg = "Release"
 
 New-Item -ItemType Directory -Force -Path $outNative, $dist, $buildOut | Out-Null
@@ -482,6 +484,19 @@ function Write-UnixText([string]$Path, [string]$Text) {
     [System.IO.File]::WriteAllText($Path, $unix, $utf8)
 }
 
+function Write-UpdateManifest([string]$Dir) {
+    $installerName = "CubeCheck-$Version-universal-windows-setup.exe"
+    $installerUrl = "https://github.com/jumpworlds/CubeCheck-payload/releases/download/v$Version/$installerName"
+    $json = @"
+{
+  "version": "$Version",
+  "installer": "$installerUrl"
+}
+"@
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText((Join-Path $Dir "version.json"), ($json.Trim() + "`n"), $utf8)
+}
+
 function Write-Sha256Sums([string]$Root) {
     $sums = Join-Path $Root "SHA256SUMS"
     $lines = New-Object System.Collections.Generic.List[string]
@@ -572,6 +587,7 @@ function Stage-GithubPayload {
         throw "github-upload пуст: нет windows-x64 и linux-x64 payload"
     }
 
+    Write-UpdateManifest $upload
     Write-Sha256Sums $upload
     $zip = Join-Path $buildOut "CubeCheck-$Version-github-payload.zip"
     Zip-Dir $upload $zip
@@ -893,6 +909,7 @@ $osxArm = Join-Path $dist "osx-arm64"
 
 if ($Target -match "^(?i)(all|release|universal|universal-local)$") {
     Publish-UniversalReleaseSet
+    & (Join-Path $PSScriptRoot "pack-sources.ps1")
     Write-Host ""
     Write-Host "Готово. Артефакты:"
     Write-Host "  $dist"

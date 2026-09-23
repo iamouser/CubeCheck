@@ -53,6 +53,14 @@ public static class AppPaths
     }
 
     public static string SettingsPath => Path.Combine(DataDir, "settings.json");
+
+    public static bool ShouldPreserveOnUpgrade(string? relativePath)
+    {
+        if (relativePath == null || string.IsNullOrWhiteSpace(relativePath)) return false;
+        var normalized = relativePath.Replace('/', '\\').TrimEnd('\\');
+        var name = Path.GetFileName(normalized);
+        return name.Equals("settings.json", StringComparison.OrdinalIgnoreCase);
+    }
     public static string ReportsDir => Path.Combine(DataDir, "reports");
     public static string AssetsDir => Path.Combine(DataDir, "assets");
 
@@ -319,8 +327,8 @@ public static class AppPaths
           "zoom": 1.0,
           "glow": {
             "enabled": true,
-            "color": [212, 175, 55],
-            "color2": [255, 214, 90],
+            "color": "#D4AF37",
+            "color2": "#FFD65A",
             "gradient": false,
             "gradient_speed": 1.0,
             "radius": 34.0,
@@ -332,7 +340,8 @@ public static class AppPaths
               "footer": true
             }
           },
-          "autosave": "on_change"
+          "autosave": "on_change",
+          "check_updates": true
         }
         """;
 }

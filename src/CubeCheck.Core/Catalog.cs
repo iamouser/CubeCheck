@@ -60,10 +60,39 @@ public static class Catalog
         "gamesense"
     ];
 
+    const string EverythingListResource = "CubeCheck.everything-list.txt";
+
+    public static readonly string[] EverythingNames = LoadPipeList(EverythingListResource);
+
     public static string EverythingSearchQuery(IEnumerable<string> terms) =>
         "(" + string.Join(" | ", terms) + ")";
 
-    public static string CheatListText() => string.Join(" | ", CheatNames);
+    public static string EverythingListText() => string.Join(" | ", EverythingNames);
+
+    public static string CheatListText() => EverythingListText();
+
+    static string[] LoadPipeList(string resourceName)
+    {
+        var asm = typeof(Catalog).Assembly;
+        using var stream = asm.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException("Нет списка Everything");
+        using var reader = new StreamReader(stream);
+        return ParsePipeList(reader.ReadToEnd());
+    }
+
+    static string[] ParsePipeList(string source)
+    {
+        var flat = source.Replace("\r\n", "\n").Replace('\n', ' ');
+        var parts = flat.Split(new[] { " | " }, StringSplitOptions.RemoveEmptyEntries);
+        var list = new List<string>(parts.Length);
+        foreach (var part in parts)
+        {
+            var term = part.Trim();
+            if (term.Length == 0) continue;
+            list.Add(term);
+        }
+        return list.ToArray();
+    }
 
     public static int? UtilIndex(string id)
     {

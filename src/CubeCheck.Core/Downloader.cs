@@ -44,7 +44,7 @@ public sealed class ToolsManifest
 
 public static class Downloader
 {
-    const string UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CubeCheck/1.1-beta";
+    const string UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CubeCheck/" + Content.AppVersion;
 
     public static bool DownloadsEnabled => AppPaths.ForensicToolsSupported && !AppPaths.IsOffline;
 

@@ -70,6 +70,10 @@ public partial class MainWindow : Window
     Action<byte[]>? _pickerSet;
     Border? _pickerSwatch;
     bool _svDrag, _hueDrag;
+    DispatcherTimer? _updateTimer;
+    UpdateOffer? _updateOffer;
+    int _updateBusy;
+    bool _updateCheckRunning;
 
     public MainWindow()
     {
@@ -176,6 +180,9 @@ public partial class MainWindow : Window
         PaintAccent(BtnSysInfo);
         PaintAccent(BtnReset);
         PaintAccent(BtnUndo);
+        PaintAccent(BtnUpdate);
+        BtnUpdate.BorderBrush = ThemeHelper.Brush(_colors.Accent);
+        BtnUpdate.Foreground = ThemeHelper.Brush(_colors.Accent);
         PaintAccent(DialogOk);
         PaintAccent(DialogCancel);
         DialogCard.Background = ThemeHelper.Brush(_colors.Card);
@@ -1101,6 +1108,14 @@ public partial class MainWindow : Window
         SettingsHost.Children.Add(RadioRow("при изменении настроек", AutosaveMode.OnChange));
         SettingsHost.Children.Add(RadioRow("не сохранять", AutosaveMode.Off));
 
+        SettingsHost.Children.Add(Section("Проверка обновлений"));
+        SettingsHost.Children.Add(CheckRow("Включена", _config.CheckUpdates, v =>
+        {
+            _config.CheckUpdates = v;
+            PersistAfterChange();
+            SyncUpdateSchedule();
+        }));
+
         SettingsHost.Children.Add(Section("Масштаб"));
         SettingsHost.Children.Add(SliderRow("Масштаб", _config.Zoom, AppConfig.ZoomMin, AppConfig.ZoomMax, v =>
         {
@@ -1160,9 +1175,12 @@ public partial class MainWindow : Window
 
     UIElement ColorRow(string label, byte[] rgb, Action<byte[]> set)
     {
+        var current = rgb is { Length: >= 3 }
+            ? new byte[] { rgb[0], rgb[1], rgb[2] }
+            : [212, 175, 55];
         var row = new Grid { Margin = new Thickness(0, 0, 0, 8), Height = 30 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(152) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.Children.Add(new TextBlock
         {
             Text = label,
@@ -1170,20 +1188,36 @@ public partial class MainWindow : Window
             Foreground = ThemeHelper.Brush(_colors.Fg),
             VerticalAlignment = VerticalAlignment.Center
         });
-        var preview = new Border
+        var box = new TextBox
         {
-            Width = 26,
-            Height = 22,
-            Cursor = Cursors.Hand,
-            Background = ThemeHelper.Brush(Color.FromRgb(rgb[0], rgb[1], rgb[2])),
-            BorderBrush = ThemeHelper.Brush(_colors.WidgetOutline),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(4),
-            VerticalAlignment = VerticalAlignment.Center
+            Text = HexColor.Format(current),
+            Width = 110,
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Background = ThemeHelper.Brush(_colors.InputBg),
+            Foreground = ThemeHelper.Brush(_colors.Fg),
+            BorderBrush = ThemeHelper.Brush(_colors.WidgetOutline)
         };
-        preview.MouseLeftButtonUp += (_, _) => OpenColorPicker(preview, rgb, set);
-        Grid.SetColumn(preview, 1);
-        row.Children.Add(preview);
+        void Commit()
+        {
+            if (HexColor.TryParse(box.Text, out var parsed))
+            {
+                current = parsed;
+                box.Text = HexColor.Format(parsed);
+                set(parsed);
+            }
+            else
+            {
+                box.Text = HexColor.Format(current);
+            }
+        }
+        box.LostFocus += (_, _) => Commit();
+        box.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter) Commit();
+        };
+        Grid.SetColumn(box, 1);
+        row.Children.Add(box);
         return row;
     }
 
@@ -1580,4 +1614,69 @@ public partial class MainWindow : Window
     }
 
     static byte ToByte(double x) => (byte)Polyfill.Clamp((int)Math.Round(x * 255), 0, 255);
+
+    public void ShowUpdateOffer(UpdateOffer offer)
+    {
+        if (string.IsNullOrWhiteSpace(offer.InstallerUrl)) return;
+        _updateOffer = offer;
+        BtnUpdate.Visibility = Visibility.Visible;
+        BtnUpdate.ToolTip = "Доступно обновление " + offer.Version;
+    }
+
+    public void StartUpdateSchedule() => SyncUpdateSchedule();
+
+    void SyncUpdateSchedule()
+    {
+        if (!_config.CheckUpdates)
+        {
+            _updateTimer?.Stop();
+            _updateTimer = null;
+            return;
+        }
+        if (_updateTimer != null) return;
+        _updateTimer = new DispatcherTimer { Interval = AppUpdate.CheckInterval };
+        _updateTimer.Tick += (_, _) => { _ = RunScheduledCheckAsync(); };
+        _updateTimer.Start();
+    }
+
+    async Task RunScheduledCheckAsync()
+    {
+        if (!_config.CheckUpdates || _updateCheckRunning || AppPaths.IsOffline || !IsVisible) return;
+        _updateCheckRunning = true;
+        try
+        {
+            var offer = await AppUpdate.CheckAsync(CancellationToken.None);
+            if (offer != null && IsVisible) ShowUpdateOffer(offer);
+        }
+        catch
+        {
+            // scheduled checks stay silent
+        }
+        finally
+        {
+            _updateCheckRunning = false;
+        }
+    }
+
+    async void OnApplyUpdate(object sender, RoutedEventArgs e)
+    {
+        var offer = _updateOffer;
+        if (offer == null || _updateBusy != 0) return;
+        _updateBusy = 1;
+        BtnUpdate.IsEnabled = false;
+        BtnUpdate.ToolTip = "Загрузка обновления…";
+        try
+        {
+            var path = await AppUpdate.DownloadInstallerAsync(offer.InstallerUrl, CancellationToken.None);
+            AppUpdate.StartInstaller(path, AppPaths.DataDir);
+            Application.Current.Shutdown();
+        }
+        catch
+        {
+            _updateBusy = 0;
+            BtnUpdate.IsEnabled = true;
+            BtnUpdate.ToolTip = "Доступно обновление " + offer.Version;
+            Alert("Не удалось скачать обновление. Программа продолжит работу.", true);
+        }
+    }
 }

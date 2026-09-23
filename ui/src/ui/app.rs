@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -68,6 +69,11 @@ pub struct CubeCheckApp {
     zoom_apply_pending: bool,
     zoom_apply_frames: u8,
     exit_saved: bool,
+    update_offer: Option<String>,
+    update_rx: Option<Receiver<Option<String>>>,
+    update_apply_rx: Option<Receiver<Result<(), String>>>,
+    last_update_check: Instant,
+    update_busy: bool,
 }
 
 pub(super) struct ResetUndo {
@@ -76,7 +82,11 @@ pub(super) struct ResetUndo {
 }
 
 impl CubeCheckApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        update_offer: Option<String>,
+        update_rx: Option<Receiver<Option<String>>>,
+    ) -> Self {
         let config = AppConfig::load();
         let theme_id = config.theme_id();
         let colors = ThemeColors::for_theme(theme_id);
@@ -112,7 +122,16 @@ impl CubeCheckApp {
             zoom_apply_pending: true,
             zoom_apply_frames: 0,
             exit_saved: false,
+            update_offer,
+            update_rx,
+            update_apply_rx: None,
+            last_update_check: Instant::now(),
+            update_busy: false,
         }
+    }
+
+    pub(super) fn clear_update_schedule(&mut self) {
+        self.update_rx = None;
     }
 
     pub(super) fn expire_reset_undo(&mut self) {
@@ -447,10 +466,126 @@ fn apply_saved_zoom(ctx: &egui::Context, zoom: f32) {
     ctx.set_pixels_per_point(zoom * native);
 }
 
+impl CubeCheckApp {
+    fn poll_updates(&mut self, ctx: &egui::Context) {
+        if let Some(rx) = &self.update_apply_rx {
+            match rx.try_recv() {
+                Ok(Ok(())) => std::process::exit(0),
+                Ok(Err(err)) => {
+                    self.update_apply_rx = None;
+                    self.update_busy = false;
+                    self.set_status(err, true);
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.update_apply_rx = None;
+                    self.update_busy = false;
+                }
+            }
+        }
+
+        if let Some(rx) = &self.update_rx {
+            match rx.try_recv() {
+                Ok(Some(url)) => {
+                    self.update_offer = Some(url);
+                    self.update_rx = None;
+                    self.last_update_check = Instant::now();
+                }
+                Ok(None) => {
+                    self.update_rx = None;
+                    self.last_update_check = Instant::now();
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.update_rx = None;
+                    self.last_update_check = Instant::now();
+                }
+            }
+        }
+
+        if self.config.check_updates
+            && self.update_rx.is_none()
+            && !crate::backend::is_offline()
+            && self.last_update_check.elapsed() >= Duration::from_secs(10 * 60)
+        {
+            self.spawn_update_check();
+        }
+
+        if self.update_offer.is_some() || self.update_rx.is_some() || self.update_apply_rx.is_some()
+        {
+            ctx.request_repaint_after(Duration::from_millis(400));
+        }
+    }
+
+    fn spawn_update_check(&mut self) {
+        if self.update_rx.is_some() || !self.config.check_updates {
+            return;
+        }
+        self.last_update_check = Instant::now();
+        let (tx, rx) = mpsc::channel();
+        self.update_rx = Some(rx);
+        thread::spawn(move || {
+            let offer = crate::backend::check_update().ok().flatten();
+            let _ = tx.send(offer);
+        });
+    }
+
+    fn begin_apply_update(&mut self) {
+        let Some(url) = self.update_offer.clone() else {
+            return;
+        };
+        if self.update_busy {
+            return;
+        }
+        self.update_busy = true;
+        let (tx, rx) = mpsc::channel();
+        self.update_apply_rx = Some(rx);
+        thread::spawn(move || {
+            let result = crate::backend::apply_update(&url);
+            let _ = tx.send(result);
+        });
+    }
+
+    fn draw_update_button(&mut self, ctx: &egui::Context) {
+        if self.update_offer.is_none() {
+            return;
+        }
+        let colors = self.colors;
+        let mut clicked = false;
+        egui::Area::new(egui::Id::new("cubecheck_update"))
+            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 8.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                let label = if self.update_busy { "…" } else { "↻" };
+                let btn = egui::Button::new(
+                    egui::RichText::new(label)
+                        .size(16.0)
+                        .color(colors.accent),
+                )
+                .fill(colors.button_bg)
+                .stroke(egui::Stroke::new(1.0_f32, colors.accent))
+                .rounding(egui::Rounding::same(6.0))
+                .min_size(egui::vec2(28.0, 28.0));
+                let tip = if self.update_busy {
+                    "Загрузка обновления…"
+                } else {
+                    "Доступно обновление"
+                };
+                if ui.add(btn).on_hover_text(tip).clicked() && !self.update_busy {
+                    clicked = true;
+                }
+            });
+        if clicked {
+            self.begin_apply_update();
+        }
+    }
+}
+
 impl eframe::App for CubeCheckApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.persist_zoom_if_changed(ctx);
         self.poll_scan();
+        self.poll_updates(ctx);
         self.maybe_autodownload();
         self.expire_reset_undo();
         if self.reset_undo.is_some() {
@@ -484,6 +619,7 @@ impl eframe::App for CubeCheckApp {
                 View::Settings => views::draw_settings(self, ui),
             });
 
+        self.draw_update_button(ctx);
         dialogs::draw_status(self, ctx);
         dialogs::draw_dialogs(self, ctx);
 

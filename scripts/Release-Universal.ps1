@@ -31,7 +31,7 @@ function Fetch-Url([string]$Url, [string]$Dest) {
     $tmp = "$Dest.part"
     if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force }
     Info "download $Url"
-    $ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CubeCheck/1.1-beta"
+    $ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CubeCheck/$Version"
     & curl.exe -L --fail --retry 3 --retry-delay 2 -A $ua -o $tmp $Url
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $tmp) -or (Get-Item -LiteralPath $tmp).Length -lt 1024) {
         Warn "не скачалось: $Url"
@@ -513,7 +513,7 @@ function New-UnixUniversalTree([string]$OutDir, [hashtable]$Payloads) {
 function Write-MacReadme([string]$Path, [bool]$HaveBinary) {
     if ($HaveBinary) {
         Write-UnixText $Path @"
-CubeCheck 1.1 beta — macOS
+CubeCheck $Version — macOS
 Авторы: AuraStudio, AnProject
 
 Запуск установщика: chmod +x install-macos.sh && ./install-macos.sh
@@ -524,7 +524,7 @@ Windows PE / Avalonia DLL в этом пакете нет.
 "@
     } else {
         Write-UnixText $Path @"
-CubeCheck 1.1 beta — macOS
+CubeCheck $Version — macOS
 Авторы: AuraStudio, AnProject
 
 CubeCheck.app и Mach-O cubecheck в этом пакете НЕТ.
@@ -585,7 +585,7 @@ function New-UnixSetupRun {
     $scriptBody = @'
 #!/bin/sh
 set -eu
-# CubeCheck 1.1 beta setup.run — chmod +x this-file && ./this-file
+# CubeCheck 1.1.1 setup.run — chmod +x this-file && ./this-file
 ARCHIVE_OFFSET={OFFSET}
 OFFLINE_FLAG={OFFLINE}
 PRODUCT=CubeCheck

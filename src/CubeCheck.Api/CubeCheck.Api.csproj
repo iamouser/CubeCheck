@@ -6,8 +6,8 @@
     <LangVersion>latest</LangVersion>
     <RootNamespace>CubeCheck.Api</RootNamespace>
     <AssemblyName>cubecheck_api</AssemblyName>
-    <Version>1.1.0</Version>
-    <InformationalVersion>1.1 beta</InformationalVersion>
+    <Version>1.1.1</Version>
+    <InformationalVersion>1.1.1</InformationalVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <PublishAot>true</PublishAot>
     <NativeLib>Shared</NativeLib>

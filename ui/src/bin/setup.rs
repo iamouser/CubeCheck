@@ -48,7 +48,7 @@ fn run() -> Result<(), String> {
     if PAYLOAD_ZIP.len() < MIN_PAYLOAD {
         return Err(
             "Установщик собран без универсального payload (архив слишком маленький).\n\
-             Соберите через build.bat — нужен CubeCheck-1.1.0-beta-universal-windows-setup.exe."
+             Соберите через build.bat — нужен CubeCheck-1.1.1-universal-windows-setup.exe."
                 .into(),
         );
     }
@@ -111,6 +111,13 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
+fn is_user_settings(name: &str) -> bool {
+    name.rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(name)
+        .eq_ignore_ascii_case("settings.json")
+}
+
 fn remove_legacy_install_root(dest: &Path) {
     for name in [
         "cubecheck_api.dll",
@@ -132,6 +139,9 @@ fn extract_payload_zip(dest: &Path) -> Result<(), String> {
         let name = file.name().replace('\\', "/");
         if name.is_empty() || name.contains("..") {
             return Err("некорректный путь в архиве установщика".into());
+        }
+        if is_user_settings(&name) {
+            continue;
         }
         let out = dest.join(name.trim_start_matches('/'));
         if file.is_dir() || name.ends_with('/') {

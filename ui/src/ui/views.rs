@@ -1,8 +1,8 @@
 use eframe::egui;
 
 use crate::config::{
-    AutosaveMode, GlowArea, GLOW_INTENSITY_MAX, GLOW_INTENSITY_MIN, GLOW_RADIUS_MAX,
-    GLOW_RADIUS_MIN, GLOW_SPEED_MAX, GLOW_SPEED_MIN,
+    format_hex, parse_hex, AutosaveMode, GlowArea, GLOW_INTENSITY_MAX, GLOW_INTENSITY_MIN,
+    GLOW_RADIUS_MAX, GLOW_RADIUS_MIN, GLOW_SPEED_MAX, GLOW_SPEED_MIN,
 };
 use crate::content::{ABOUT_TEXT, APP_VERSION, AUTHORS};
 use crate::scan::{cheat_list_text, ScanState};
@@ -13,7 +13,6 @@ use crate::tools::paths::tool_installed;
 use crate::tools::{open_recycle_bin, open_telegram, run_system_info, run_util, UTILS};
 
 use super::app::{ComponentStatus, CubeCheckApp, View};
-use super::color_picker;
 use super::glow;
 use super::layout;
 use super::widgets::{
@@ -523,6 +522,8 @@ pub(super) fn draw_settings(app: &mut CubeCheckApp, ui: &mut egui::Ui) {
                 draw_areas_section(app, ui);
                 ui.add_space(SETTINGS_SECTION_GAP);
                 draw_autosave_section(app, ui);
+                ui.add_space(SETTINGS_SECTION_GAP);
+                draw_updates_section(app, ui);
             });
 
         ui.add_space(8.0);
@@ -587,21 +588,9 @@ fn draw_glow_section(app: &mut CubeCheckApp, ui: &mut egui::Ui) {
     let mut changed = false;
     changed |= settings_checkbox_row(ui, &colors, "Включена", &mut app.config.glow.enabled);
 
-    settings_row(ui, &colors, "Цвет", |ui| {
-        ui.spacing_mut().interact_size.y = 22.0;
-        changed |= color_picker::color_edit_button_srgb(ui, "glow_color", &mut app.config.glow.color)
-            .changed();
-    });
+    changed |= hex_color_row(ui, &colors, "Цвет", &mut app.config.glow.color);
     if app.config.glow.gradient {
-        settings_row(ui, &colors, "Цвет 2", |ui| {
-            ui.spacing_mut().interact_size.y = 22.0;
-            changed |= color_picker::color_edit_button_srgb(
-                ui,
-                "glow_color2",
-                &mut app.config.glow.color2,
-            )
-            .changed();
-        });
+        changed |= hex_color_row(ui, &colors, "Цвет 2", &mut app.config.glow.color2);
     }
 
     changed |= settings_checkbox_row(ui, &colors, "Градиент", &mut app.config.glow.gradient);
@@ -636,6 +625,55 @@ fn draw_glow_section(app: &mut CubeCheckApp, ui: &mut egui::Ui) {
     if changed {
         app.config.glow.sanitize();
         app.persist_after_change();
+    }
+}
+
+fn hex_color_row(
+    ui: &mut egui::Ui,
+    colors: &crate::theme::ThemeColors,
+    label: &str,
+    rgb: &mut [u8; 3],
+) -> bool {
+    let mut changed = false;
+    settings_row(ui, colors, label, |ui| {
+        let id = ui.make_persistent_id((label, "hex"));
+        let mut text = ui
+            .ctx()
+            .data(|d| d.get_temp::<String>(id))
+            .unwrap_or_else(|| format_hex(*rgb));
+        let resp = ui.add(
+            egui::TextEdit::singleline(&mut text)
+                .id(id)
+                .desired_width(110.0)
+                .font(egui::TextStyle::Monospace),
+        );
+        if resp.changed() {
+            if let Some(parsed) = parse_hex(&text) {
+                if parsed != *rgb {
+                    *rgb = parsed;
+                    changed = true;
+                }
+            }
+        }
+        if resp.has_focus() {
+            ui.ctx().data_mut(|d| d.insert_temp(id, text));
+        } else {
+            ui.ctx().data_mut(|d| d.remove::<String>(id));
+        }
+    });
+    changed
+}
+
+fn draw_updates_section(app: &mut CubeCheckApp, ui: &mut egui::Ui) {
+    let colors = app.colors;
+    settings_section_title(ui, &colors, "Проверка обновлений");
+    let mut enabled = app.config.check_updates;
+    if settings_checkbox_row(ui, &colors, "Включена", &mut enabled) {
+        app.config.check_updates = enabled;
+        app.persist_after_change();
+        if !enabled {
+            app.clear_update_schedule();
+        }
     }
 }
 

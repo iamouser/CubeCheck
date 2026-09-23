@@ -10,8 +10,8 @@
     <AssemblyName>cubecheck</AssemblyName>
     <ApplicationIcon>..\..\assets\cubecheck.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.1.0</Version>
-    <InformationalVersion>1.1 beta</InformationalVersion>
+    <Version>1.1.1</Version>
+    <InformationalVersion>1.1.1</InformationalVersion>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\CubeCheck.Core\CubeCheck.Core.csproj" />

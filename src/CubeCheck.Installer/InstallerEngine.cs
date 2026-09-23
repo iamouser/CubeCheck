@@ -11,12 +11,13 @@ public readonly record struct InstallProgress(double Percent, string Status, str
 
 static class InstallerEngine
 {
-    const string UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CubeCheck-Setup/1.1-beta";
+    const string UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CubeCheck-Setup/1.1.1";
 
     static readonly HashSet<string> SkipNamesAlways = new(StringComparer.OrdinalIgnoreCase)
     {
         "CubeCheck-Setup.exe",
         "CubeCheck-1.1.0-beta-setup.exe",
+        "CubeCheck-1.1.1-setup.exe",
         "cubecheck-setup.exe",
         "cubecheck-launcher.exe",
         "setup.json"
@@ -400,6 +401,7 @@ static class InstallerEngine
         if (parts.Any(p => SkipDirsAlways.Contains(p))) return true;
         if (!offline && parts.Any(p => SkipDirsOnline.Contains(p))) return true;
         var name = Path.GetFileName(rel);
+        if (name.Equals("settings.json", StringComparison.OrdinalIgnoreCase)) return true;
         if (SkipNamesAlways.Contains(name)) return true;
         if (!offline && SkipVendorFiles.Contains(name)) return true;
         if (AssetsOnlyNames.Contains(name) &&

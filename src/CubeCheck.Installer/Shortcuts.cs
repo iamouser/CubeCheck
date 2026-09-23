@@ -82,7 +82,7 @@ static class Shortcuts
             "[Desktop Entry]",
             "Type=Application",
             "Name=CubeCheck",
-            "Comment=CubeCheck 1.1 beta",
+            "Comment=CubeCheck 1.1.1",
             $"Exec=\"{target}\"",
             $"Path={dest}",
             File.Exists(icon) ? $"Icon={icon}" : "Icon=application-x-executable",

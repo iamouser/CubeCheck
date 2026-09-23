@@ -8,7 +8,7 @@ namespace CubeCheck.Installer;
 public sealed class SetupFile
 {
     [JsonPropertyName("url")] public string Url { get; set; } = "";
-    [JsonPropertyName("version")] public string Version { get; set; } = "1.1.0-beta";
+    [JsonPropertyName("version")] public string Version { get; set; } = "1.1.1";
     [JsonPropertyName("product")] public string Product { get; set; } = "CubeCheck";
     [JsonPropertyName("authors")] public string Authors { get; set; } = "AuraStudio, AnProject";
 }
@@ -25,10 +25,12 @@ public sealed class InstallOptions
 public static class InstallerConfig
 {
     public const string Product = "CubeCheck";
-    public const string VersionLabel = "1.1 beta";
+    public const string VersionLabel = "1.1.1";
     public const string Authors = "AuraStudio, AnProject";
     public const string DefaultPayloadUrl =
         "https://github.com/jumpworlds/CubeCheck-payload/archive/refs/heads/main.zip";
+    public const string UpdateManifestUrl =
+        "https://raw.githubusercontent.com/jumpworlds/CubeCheck-payload/main/version.json";
 
     public const string EmbeddedPayloadName = "CubeCheck.Installer.payload.zip";
 
@@ -39,8 +41,8 @@ public static class InstallerConfig
           "zoom": 1.0,
           "glow": {
             "enabled": true,
-            "color": [212, 175, 55],
-            "color2": [255, 214, 90],
+            "color": "#D4AF37",
+            "color2": "#FFD65A",
             "gradient": false,
             "gradient_speed": 1.0,
             "radius": 34.0,
@@ -52,7 +54,8 @@ public static class InstallerConfig
               "footer": true
             }
           },
-          "autosave": "on_change"
+          "autosave": "on_change",
+          "check_updates": true
         }
         """;
 

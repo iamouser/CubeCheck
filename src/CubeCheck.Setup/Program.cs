@@ -138,6 +138,7 @@ static class Program
             var name = Path.GetFileName(file);
             if (name.Equals("CubeCheck-Setup.exe", StringComparison.OrdinalIgnoreCase)) continue;
             var rel = Path.GetRelativePath(src, file);
+            if (AppPaths.ShouldPreserveOnUpgrade(rel)) continue;
             var target = Path.Combine(dest, rel);
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             CopyRetry(file, target);

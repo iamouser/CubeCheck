@@ -12,8 +12,8 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <StartupObject>CubeCheck.Installer.Program</StartupObject>
     <DefineConstants>$(DefineConstants);DISABLE_GENERATED_MAIN</DefineConstants>
-    <Version>1.1.0</Version>
-    <InformationalVersion>1.1 beta</InformationalVersion>
+    <Version>1.1.1</Version>
+    <InformationalVersion>1.1.1</InformationalVersion>
     <SelfContained>false</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>false</IncludeNativeLibrariesForSelfExtract>

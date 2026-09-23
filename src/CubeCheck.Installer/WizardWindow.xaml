@@ -31,7 +31,7 @@
           <TextBlock x:Name="TxtWizardKind" Text="Мастер установки" Foreground="{DynamicResource CcDim}" Margin="0,2,0,0"/>
         </StackPanel>
         <StackPanel Grid.Column="1" HorizontalAlignment="Right">
-          <TextBlock Text="1.1 beta" Foreground="{DynamicResource CcGold}"
+          <TextBlock Text="1.1.1" Foreground="{DynamicResource CcGold}"
                      FontWeight="SemiBold" HorizontalAlignment="Right"/>
           <TextBlock Text="AuraStudio, AnProject" Foreground="{DynamicResource CcGold}"
                      FontSize="12" HorizontalAlignment="Right"/>
@@ -166,7 +166,7 @@
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
               <TextBlock Text="Установка завершена" FontSize="22" FontWeight="Bold"
                          Foreground="{DynamicResource CcGold}" HorizontalAlignment="Center"/>
-              <TextBlock Text="CubeCheck 1.1 beta готов к работе."
+              <TextBlock Text="CubeCheck 1.1.1 готов к работе."
                          Foreground="{DynamicResource CcDim}" HorizontalAlignment="Center" Margin="0,10,0,0"/>
               <TextBlock Text="AuraStudio, AnProject"
                          Foreground="{DynamicResource CcGold}" HorizontalAlignment="Center" Margin="0,6,0,0"/>
